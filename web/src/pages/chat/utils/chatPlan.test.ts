@@ -17,6 +17,9 @@ function createAssistantMessage(
   };
 }
 
+const STEP_INSPECT = { step_id: "1", subject: "Inspect the repository", status: "pending" as const };
+const STEP_FIX = { step_id: "2", subject: "Ship the fix", status: "pending" as const };
+
 describe("deriveComposerTaskPlan", () => {
   it("promotes the first pending step to running for an active task", () => {
     const taskPlan = deriveComposerTaskPlan([
@@ -33,22 +36,7 @@ describe("deriveComposerTaskPlan", () => {
                 iteration: 0,
                 timestamp: "2026-03-15T00:00:00.000Z",
                 data: {
-                  plan: [
-                    {
-                      step_id: "1",
-                      general_goal: "Inspect the repository",
-                      specific_description: "Review the current files",
-                      completion_criteria: "Context is collected",
-                      status: "pending",
-                    },
-                    {
-                      step_id: "2",
-                      general_goal: "Ship the fix",
-                      specific_description: "Patch the bug",
-                      completion_criteria: "Change is merged",
-                      status: "pending",
-                    },
-                  ],
+                  plan: [STEP_INSPECT, STEP_FIX],
                 },
               },
             ],
@@ -83,20 +71,8 @@ describe("deriveComposerTaskPlan", () => {
                 timestamp: "2026-03-15T00:00:00.000Z",
                 data: {
                   plan: [
-                    {
-                      step_id: "1",
-                      general_goal: "Inspect the repository",
-                      specific_description: "Review the current files",
-                      completion_criteria: "Context is collected",
-                      status: "done",
-                    },
-                    {
-                      step_id: "2",
-                      general_goal: "Ship the fix",
-                      specific_description: "Patch the bug",
-                      completion_criteria: "Change is merged",
-                      status: "pending",
-                    },
+                    { ...STEP_INSPECT, status: "done" },
+                    STEP_FIX,
                   ],
                 },
               },
@@ -127,15 +103,7 @@ describe("deriveComposerTaskPlan", () => {
                 iteration: 0,
                 timestamp: "2026-03-15T00:00:00.000Z",
                 data: {
-                  plan: [
-                    {
-                      step_id: "1",
-                      general_goal: "Inspect the repository",
-                      specific_description: "Review the current files",
-                      completion_criteria: "Context is collected",
-                      status: "pending",
-                    },
-                  ],
+                  plan: [STEP_INSPECT],
                 },
               },
             ],
@@ -149,26 +117,14 @@ describe("deriveComposerTaskPlan", () => {
             trace_id: "trace-2",
             events: [
               {
-                type: "message",
+                type: "plan_update",
                 task_id: "task-1",
                 iteration: 1,
                 timestamp: "2026-03-15T00:00:02.000Z",
                 data: {
-                  current_plan: [
-                    {
-                      step_id: "1",
-                      general_goal: "Inspect the repository",
-                      specific_description: "Review the current files",
-                      completion_criteria: "Context is collected",
-                      status: "done",
-                    },
-                    {
-                      step_id: "2",
-                      general_goal: "Ship the fix",
-                      specific_description: "Patch the bug",
-                      completion_criteria: "Change is merged",
-                      status: "running",
-                    },
+                  plan: [
+                    { ...STEP_INSPECT, status: "done" },
+                    { ...STEP_FIX, status: "running" },
                   ],
                 },
               },
@@ -191,21 +147,9 @@ describe("deriveComposerTaskPlan", () => {
     const taskPlan = deriveComposerTaskPlan([
       createAssistantMessage({
         status: "completed",
-        currentPlan: [
-          {
-            step_id: "1",
-            general_goal: "Inspect the repository",
-            specific_description: "Review the current files",
-            completion_criteria: "Context is collected",
-            status: "done",
-          },
-          {
-            step_id: "2",
-            general_goal: "Ship the fix",
-            specific_description: "Patch the bug",
-            completion_criteria: "Change is merged",
-            status: "running",
-          },
+        currentSteps: [
+          { ...STEP_INSPECT, status: "done" },
+          { ...STEP_FIX, status: "running" },
         ],
         recursions: [],
       }),
@@ -217,22 +161,7 @@ describe("deriveComposerTaskPlan", () => {
   it("prefers a newer live plan event over persisted history after reconnect", () => {
     const taskPlan = deriveComposerTaskPlan([
       createAssistantMessage({
-        currentPlan: [
-          {
-            step_id: "1",
-            general_goal: "Inspect the repository",
-            specific_description: "Review the current files",
-            completion_criteria: "Context is collected",
-            status: "pending",
-          },
-          {
-            step_id: "2",
-            general_goal: "Ship the fix",
-            specific_description: "Patch the bug",
-            completion_criteria: "Change is merged",
-            status: "pending",
-          },
-        ],
+        currentSteps: [STEP_INSPECT, STEP_FIX],
         recursions: [
           {
             uid: "rec-2",
@@ -240,26 +169,14 @@ describe("deriveComposerTaskPlan", () => {
             trace_id: "trace-2",
             events: [
               {
-                type: "message",
+                type: "plan_update",
                 task_id: "task-1",
                 iteration: 1,
                 timestamp: "2026-03-15T00:00:02.000Z",
                 data: {
-                  current_plan: [
-                    {
-                      step_id: "1",
-                      general_goal: "Inspect the repository",
-                      specific_description: "Review the current files",
-                      completion_criteria: "Context is collected",
-                      status: "done",
-                    },
-                    {
-                      step_id: "2",
-                      general_goal: "Ship the fix",
-                      specific_description: "Patch the bug",
-                      completion_criteria: "Change is merged",
-                      status: "running",
-                    },
+                  plan: [
+                    { ...STEP_INSPECT, status: "done" },
+                    { ...STEP_FIX, status: "running" },
                   ],
                 },
               },
@@ -293,15 +210,7 @@ describe("deriveComposerTaskPlan", () => {
                 iteration: 0,
                 timestamp: "2026-03-15T00:00:00.000Z",
                 data: {
-                  plan: [
-                    {
-                      step_id: "1",
-                      general_goal: "Old plan",
-                      specific_description: "",
-                      completion_criteria: "",
-                      status: "pending",
-                    },
-                  ],
+                  plan: [{ step_id: "1", title: "Old plan", status: "pending" }],
                 },
               },
             ],

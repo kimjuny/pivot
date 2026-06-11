@@ -27,6 +27,7 @@ import {
   type ChatSurfaceDescriptorResponse,
   getFullSessionHistory,
   getPreviewEndpoints,
+  getTaskPlan,
   getReactContextUsage,
   getReactRuntimeSkills,
   getReactSessionRuntimeDebug,
@@ -37,6 +38,7 @@ import {
   startReactTask,
   submitMidTaskInput,
   submitReactUserAction,
+  updatePlanText,
   updateProject,
   updateSession,
   type ProjectResponse,
@@ -109,7 +111,7 @@ import type {
   MandatorySkillSelection,
   ChatReplyTarget,
   ChatSidebarProjectItem,
-  PlanStepData,
+  PlanReviewData,
   ReactStreamEvent,
   RecursionRecord,
   SkillChangeApprovalRequest,
@@ -558,27 +560,21 @@ function applyStreamedSessionTitle(
 }
 
 /**
- * Narrows live plan payloads so the composer task panel can keep following the
- * active task after a history-based reconnect.
+ * Detect a successful ``task`` tool result so the frontend can fetch fresh steps.
+ *
+ * The task tool result is intentionally lightweight (``{success: true}``) to
+ * avoid redundant tokens in the LLM context — the frontend pulls step data
+ * on-demand via the plan API instead of receiving it in the SSE event.
  */
-function extractLiveCurrentPlan(event: ReactStreamEvent): PlanStepData[] | undefined {
-  if (typeof event.data !== "object" || event.data === null || Array.isArray(event.data)) {
-    return undefined;
+function isSuccessfulTaskToolResult(event: ReactStreamEvent): boolean {
+  if (event.type !== "tool_result" || typeof event.data !== "object" || event.data === null) {
+    return false;
   }
-
-  if (event.type === "message") {
-    const messagePayload = event.data as { current_plan?: PlanStepData[] };
-    return Array.isArray(messagePayload.current_plan)
-      ? messagePayload.current_plan
-      : undefined;
+  const results = (event.data as { tool_results?: Array<{ name?: string; success?: boolean }> }).tool_results;
+  if (!Array.isArray(results)) {
+    return false;
   }
-
-  if (event.type === "plan_update") {
-    const planPayload = event.data as { plan?: PlanStepData[] };
-    return Array.isArray(planPayload.plan) ? planPayload.plan : undefined;
-  }
-
-  return undefined;
+  return results.some((tr) => tr.name === "task" && tr.success === true);
 }
 
 /**
@@ -740,6 +736,7 @@ function ChatContainer({
   const loadedTaskIds =
     chatSessionRuntime?.loadedTaskIds ?? EMPTY_LOADED_TASK_IDS;
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [planReviewSubmitting, setPlanReviewSubmitting] = useState<boolean>(false);
   const [pendingMidTaskInput, setPendingMidTaskInput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedRecursions, setExpandedRecursions] = useState<
@@ -1292,6 +1289,60 @@ function ChatContainer({
     [commitMessages, syncLiveRefsFromMessages],
   );
 
+  /**
+   * Lazy-loads plan text for history messages whose planReview was built with
+   * plan_text="" (completed tasks only have step data in the history payload).
+   *
+   * Naturally idempotent: after the fetch fills plan_text, the filter finds
+   * no candidates and the effect is a no-op.  If a subsequent history reload
+   * resets plan_text to "", the effect re-fetches (the API is fast and
+   * idempotent).  The updater function always reads the latest state, so
+   * stale writes are harmless.
+   */
+  useEffect(() => {
+    const taskIds = messages
+      .filter(
+        (msg) =>
+          msg.role === "assistant" &&
+          msg.planReview &&
+          msg.planReview.plan_text === "" &&
+          typeof msg.task_id === "string",
+      )
+      .map((msg) => msg.task_id!);
+
+    if (taskIds.length === 0) return;
+
+    void Promise.all(taskIds.map((id) => getTaskPlan(id)))
+      .then((results) => {
+        const resultMap = new Map(
+          taskIds.map((id, i) => [id, results[i]?.plan_text]),
+        );
+        updateMessages((prev) =>
+          prev.map((msg) => {
+            if (
+              msg.role !== "assistant" ||
+              !msg.planReview ||
+              msg.planReview.plan_text !== "" ||
+              typeof msg.task_id !== "string"
+            ) {
+              return msg;
+            }
+            const planText = resultMap.get(msg.task_id);
+            if (planText) {
+              return {
+                ...msg,
+                planReview: { ...msg.planReview, plan_text: planText },
+              };
+            }
+            return msg;
+          }),
+        );
+      })
+      .catch((err) => {
+        console.error("Failed to lazy-load plan texts:", err);
+      });
+  }, [messages, updateMessages]);
+
   const isTaskLoaded = useCallback((taskId: string) => {
     return chatSessionRuntimeRef.current?.loadedTaskIds.has(taskId) ?? false;
   }, [chatSessionRuntimeRef]);
@@ -1835,6 +1886,7 @@ function ChatContainer({
       if (
         event.type === "answer" ||
         event.type === "clarify" ||
+        event.type === "plan_review" ||
         event.type === "task_cancelled" ||
         event.type === "task_complete" ||
         event.type === "error"
@@ -1845,6 +1897,7 @@ function ChatContainer({
 
         if (
           event.type === "clarify" ||
+          event.type === "plan_review" ||
           event.type === "task_complete" ||
           event.type === "task_cancelled" ||
           (event.type === "error" && isTerminalError)
@@ -1890,6 +1943,14 @@ function ChatContainer({
           setActiveContextIteration(null);
           clearCompactStatusWithMinimumDelay();
           setReplyTaskId(approvalRequest ? null : event.task_id);
+          liveTaskIdRef.current = event.task_id;
+          liveRecursionRef.current = finalizedRecursion;
+        } else if (event.type === "plan_review") {
+          setIsStreaming(false);
+          setActiveContextTaskId(null);
+          setActiveContextIteration(null);
+          clearCompactStatusWithMinimumDelay();
+          setReplyTaskId(null);
           liveTaskIdRef.current = event.task_id;
           liveRecursionRef.current = finalizedRecursion;
         } else if (
@@ -2005,6 +2066,25 @@ function ChatContainer({
               };
             }
 
+            if (event.type === "plan_review") {
+              const planData = event.data as PlanReviewData;
+              return {
+                ...message,
+                recursions: updatedRecursions,
+                planReview: {
+                  plan_text: planData.plan_text ?? "",
+                  approved: false,
+                },
+                pendingUserAction: {
+                  kind: "plan_review",
+                  approvalRequest: planData,
+                },
+                status: "waiting_input" as const,
+                errorMessage: undefined,
+                timestamp: event.timestamp,
+              };
+            }
+
             if (event.type === "error") {
               if (!isTerminalError) {
                 return {
@@ -2084,7 +2164,27 @@ function ChatContainer({
         trace_id: event.trace_id || currentRecursion.trace_id,
         events: updatedEvents,
       };
-      const nextCurrentPlan = extractLiveCurrentPlan(event);
+      // When the task tool succeeds, fetch fresh steps from the API for the
+      // Composer panel. The tool result is intentionally lightweight (no steps)
+      // to avoid redundant tokens in the LLM context.
+      if (isSuccessfulTaskToolResult(event) && event.task_id) {
+        void getTaskPlan(event.task_id)
+          .then((planData) => {
+            if (!Array.isArray(planData.steps) || planData.steps.length === 0) {
+              return;
+            }
+            updateMessages((prev) =>
+              prev.map((msg) =>
+                msg.role === "assistant" && msg.task_id === event.task_id
+                  ? { ...msg, currentSteps: planData.steps }
+                  : msg,
+              ),
+            );
+          })
+          .catch((fetchError) => {
+            console.error("Failed to fetch steps after task tool success:", fetchError);
+          });
+      }
 
       if (event.type === "token_rate") {
         const tokenRate = parseTokenRateData(event.data);
@@ -2184,7 +2284,6 @@ function ChatContainer({
                       : ""
                   }`
                 : message.content,
-            currentPlan: nextCurrentPlan ?? message.currentPlan,
           };
         }),
       );
@@ -3663,6 +3762,95 @@ function ChatContainer({
     updateMessages,
   ]);
 
+  const handlePlanDecision = useCallback((
+    decision: "approve" | "reject",
+    taskId: string,
+  ) => {
+    setError(null);
+    setIsStreaming(true);
+    setPlanReviewSubmitting(false);
+    setReplyTaskId(null);
+    setActiveContextTaskId(null);
+    setActiveContextIteration(null);
+    clearCompactStatusImmediately();
+    updateMessages((messagesSnapshot) =>
+      messagesSnapshot.map((message) =>
+        message.task_id === taskId && message.role === "assistant"
+          ? {
+              ...message,
+              status: "running" as const,
+              pendingUserAction: undefined,
+              planReview: message.planReview
+                ? { ...message.planReview, approved: true }
+                : undefined,
+            }
+          : message,
+      ),
+    );
+
+    void submitReactUserAction(taskId, decision)
+      .then(() => {
+        void refreshSidebarData().catch((refreshError) => {
+          console.error(
+            "Failed to refresh session list after plan decision:",
+            refreshError,
+          );
+        });
+      })
+      .catch((actionError) => {
+        console.error("Failed to submit plan decision:", actionError);
+        setIsStreaming(false);
+        setError("Failed to submit plan decision");
+        if (currentSessionIdRef.current) {
+          void getFullSessionHistory(currentSessionIdRef.current, {
+            limit: CHAT_HISTORY_PAGE_SIZE,
+          })
+            .then((history) => {
+              loadHistoryResponse(history, true);
+            })
+            .catch((historyError) => {
+              console.error(
+                "Failed to restore session after plan decision failed:",
+                historyError,
+              );
+            });
+        }
+      });
+  }, [
+    loadHistoryResponse,
+    clearCompactStatusImmediately,
+    refreshSidebarData,
+    updateMessages,
+  ]);
+
+  const handlePlanApprove = useCallback((taskId: string) => {
+    handlePlanDecision("approve", taskId);
+  }, [handlePlanDecision]);
+
+  const handlePlanReject = useCallback((taskId: string) => {
+    handlePlanDecision("reject", taskId);
+  }, [handlePlanDecision]);
+
+  const handlePlanEdit = useCallback((taskId: string, newText: string) => {
+    setPlanReviewSubmitting(true);
+    updatePlanText(taskId, newText)
+      .then(() => {
+        updateMessages((msgs) =>
+          msgs.map((msg) =>
+            msg.task_id === taskId && msg.role === "assistant" && msg.planReview
+              ? { ...msg, planReview: { ...msg.planReview, plan_text: newText } }
+              : msg,
+          ),
+        );
+        handlePlanDecision("approve", taskId);
+      })
+      .catch((editError) => {
+        console.error("Failed to edit plan:", editError);
+        setPlanReviewSubmitting(false);
+        setError("Failed to save edited plan");
+      });
+  }, [handlePlanDecision, updateMessages]);
+
   /**
    * Tracks recursion accordion state per message without leaking that detail into message models.
    */
@@ -4376,6 +4564,10 @@ function ChatContainer({
               onEditSubmit={handleEditSubmit}
               onApproveSkillChange={handleApproveSkillChange}
               onRejectSkillChange={handleRejectSkillChange}
+              onPlanApprove={handlePlanApprove}
+              onPlanReject={handlePlanReject}
+              onPlanEdit={handlePlanEdit}
+              planReviewSubmitting={planReviewSubmitting}
             />
           )}
           <div className="h-1" />

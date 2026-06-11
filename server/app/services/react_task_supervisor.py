@@ -142,7 +142,7 @@ class ReactTaskSupervisor:
         """Apply one structured waiting action and resume the task.
 
         Dispatches by the ``type`` field in the persisted action dict.
-        Currently supports ``"skill_change_approval"``.
+        Supports ``"skill_change_approval"`` and ``"plan_review"``.
         """
         with managed_session() as db:
             statement = select(ReactTask).where(ReactTask.task_id == task_id)
@@ -159,42 +159,32 @@ class ReactTaskSupervisor:
                 raise ValueError("Task does not have a structured pending user action")
 
             action_type = pending_user_action.get("type")
-            if action_type != "skill_change_approval":
+            runtime_service = ReactRuntimeService(db)
+
+            if action_type == "skill_change_approval":
+                self._apply_skill_change_decision(
+                    db=db,
+                    task=task,
+                    user_id=user_id,
+                    pending_user_action=pending_user_action,
+                    decision=decision,
+                    runtime_service=runtime_service,
+                )
+            elif action_type == "plan_review":
+                runtime_service.set_next_action_result(
+                    task,
+                    [
+                        {
+                            "result": {
+                                "kind": "plan_review_result",
+                                "decision": decision,
+                            }
+                        }
+                    ],
+                )
+            else:
                 raise ValueError(f"Unsupported pending user action type: {action_type}")
 
-            payload = pending_user_action.get("payload")
-            if not isinstance(payload, dict):
-                raise ValueError("Pending user action is missing payload")
-            approval_request = payload.get("approval_request")
-            if not isinstance(approval_request, dict):
-                raise ValueError("Pending user action is missing approval metadata")
-            submission_id = approval_request.get("submission_id")
-            if not isinstance(submission_id, int) or submission_id <= 0:
-                raise ValueError("Pending user action is missing submission_id")
-
-            current_user = db.get(User, user_id)
-            if current_user is None:
-                raise ValueError(f"User '{user_id}' not found.")
-
-            apply_result = apply_skill_change_submission(
-                db,
-                current_user,
-                submission_id=submission_id,
-                decision=decision,
-            )
-            runtime_service = ReactRuntimeService(db)
-            runtime_service.set_next_action_result(
-                task,
-                [
-                    {
-                        "result": {
-                            "kind": "skill_change_result",
-                            "decision": decision,
-                            **apply_result,
-                        }
-                    }
-                ],
-            )
             task.status = "pending"
             task.cancel_requested_at = None
             task.updated_at = datetime.now(UTC)
@@ -545,6 +535,50 @@ class ReactTaskSupervisor:
         except json.JSONDecodeError:
             return None
         return parsed if isinstance(parsed, dict) else None
+
+    def _apply_skill_change_decision(
+        self,
+        *,
+        db: Session,
+        task: ReactTask,
+        user_id: int,
+        pending_user_action: dict[str, Any],
+        decision: Literal["approve", "reject"],
+        runtime_service: ReactRuntimeService,
+    ) -> None:
+        """Apply a skill-change approval decision and set the action result."""
+        payload = pending_user_action.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("Pending user action is missing payload")
+        approval_request = payload.get("approval_request")
+        if not isinstance(approval_request, dict):
+            raise ValueError("Pending user action is missing approval metadata")
+        submission_id = approval_request.get("submission_id")
+        if not isinstance(submission_id, int) or submission_id <= 0:
+            raise ValueError("Pending user action is missing submission_id")
+
+        current_user = db.get(User, user_id)
+        if current_user is None:
+            raise ValueError(f"User '{user_id}' not found.")
+
+        apply_result = apply_skill_change_submission(
+            db,
+            current_user,
+            submission_id=submission_id,
+            decision=decision,
+        )
+        runtime_service.set_next_action_result(
+            task,
+            [
+                {
+                    "result": {
+                        "kind": "skill_change_result",
+                        "decision": decision,
+                        **apply_result,
+                    }
+                }
+            ],
+        )
 
     def _inject_clarify_reply(
         self,

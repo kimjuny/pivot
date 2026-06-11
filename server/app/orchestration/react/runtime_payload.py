@@ -2,83 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
-from app.config import get_settings
-
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from app.models.react import ReactTask
 
     from .context import ReactContext
 
-
-def build_current_plan_payload(context: ReactContext) -> list[dict[str, Any]]:
-    """Convert the current plan context into the structured prompt payload."""
-    current_plan: list[dict[str, Any]] = []
-    history_limit = max(get_settings().REACT_CURRENT_PLAN_HISTORY_LIMIT, 0)
-    for step in context.context.get("plan", []):
-        if not isinstance(step, dict):
-            continue
-        step_id = step.get("step_id")
-        if not isinstance(step_id, str):
-            continue
-        recursion_history: list[dict[str, Any]] = []
-        raw_history = step.get("recursion_history", [])
-        if isinstance(raw_history, list):
-            history_slice = raw_history[-history_limit:] if history_limit > 0 else []
-            for history_entry in history_slice:
-                if not isinstance(history_entry, dict):
-                    continue
-                recursion_history.append(
-                    {
-                        "iteration": history_entry.get("iteration"),
-                        "message": history_entry.get("message", ""),
-                    }
-                )
-        current_plan.append(
-            {
-                "step_id": step_id,
-                "general_goal": step.get("general_goal", ""),
-                "specific_description": step.get("specific_description", ""),
-                "completion_criteria": step.get("completion_criteria", ""),
-                "status": step.get("status", "pending"),
-                "recursion_history": recursion_history,
-            }
-        )
-    return current_plan
-
-
-def build_plan_status_line(context: ReactContext) -> str:
-    """Build a one-line plan summary used before compaction."""
-    steps: list[dict[str, Any]] = [
-        s
-        for s in context.context.get("plan", [])
-        if isinstance(s, dict) and isinstance(s.get("step_id"), str)
-    ]
-    if not steps:
-        return ""
-
-    done_ids: list[str] = []
-    in_progress_ids: list[str] = []
-    pending_ids: list[str] = []
-    for step in steps:
-        step_id = str(step.get("step_id", ""))
-        status = step.get("status", "pending")
-        if status == "done":
-            done_ids.append(step_id)
-        elif status == "in_progress":
-            in_progress_ids.append(step_id)
-        else:
-            pending_ids.append(step_id)
-
-    parts: list[str] = []
-    if done_ids:
-        parts.append(f"Steps {','.join(done_ids)} done")
-    if in_progress_ids:
-        parts.append(f"Step {','.join(in_progress_ids)} in_progress")
-    if pending_ids:
-        parts.append(f"Steps {','.join(pending_ids)} pending")
-    return ", ".join(parts) if parts else ""
+from .plan_files import (
+    format_plan_full,
+    plan_exists,
+    read_steps,
+)
 
 
 def build_recursion_user_payload(
@@ -90,6 +28,9 @@ def build_recursion_user_payload(
     after_compaction: bool = False,
     user_intent_override: str | None = None,
     include_action_result: bool = True,
+    workspace_path: str | Path | None = None,
+    previous_steps_json: str | None = None,
+    system_feedback: str | None = None,
 ) -> dict[str, Any]:
     """Build the next recursion payload appended as a user message.
 
@@ -99,15 +40,29 @@ def build_recursion_user_payload(
     requested (e.g. for non-tool CALL_TOOL legacy compatibility during
     the transition period).
     """
-    if after_compaction:
-        plan_value: str | list[dict[str, Any]] = build_current_plan_payload(context)
-    else:
-        plan_value = build_plan_status_line(context)
+    steps_value: str | list[dict[str, Any]] = ""
+    plan_file_path: str | None = None
+    if workspace_path and plan_exists(workspace_path, task.task_id):
+        steps = read_steps(workspace_path, task.task_id)
+        plan_file_path = f".pivot/plans/{task.task_id}"
+        steps_value = format_plan_full(steps)
+
+        # Compress to "no changes" when steps are identical to previous iteration.
+        if (
+            previous_steps_json is not None
+            and isinstance(steps_value, list)
+            and previous_steps_json
+        ):
+            current_json = json.dumps(steps_value, ensure_ascii=False)
+            if current_json == previous_steps_json:
+                steps_value = "no changes"
 
     payload: dict[str, Any] = {
         "iteration": task.iteration + 1,
-        "current_plan": plan_value,
+        "current_steps": steps_value,
     }
+    if plan_file_path:
+        payload["plan_file"] = plan_file_path
     if task.iteration == 0:
         payload["user_intent"] = task.user_intent
     elif user_intent_override is not None:
@@ -116,4 +71,6 @@ def build_recursion_user_payload(
         payload["action_result"] = pending_action_result
     if attachments:
         payload["attachments"] = attachments
+    if system_feedback:
+        payload["system_feedback"] = system_feedback
     return payload

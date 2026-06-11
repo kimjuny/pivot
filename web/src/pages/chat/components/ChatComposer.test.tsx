@@ -106,15 +106,11 @@ describe("ChatComposer", () => {
               {
                 stepId: "1",
                 title: "Inspect the repository",
-                description: "Review the current files",
-                completionCriteria: "Context is collected",
                 status: "running",
               },
               {
                 stepId: "2",
                 title: "Ship the fix",
-                description: "Patch the bug",
-                completionCriteria: "Change is merged",
                 status: "pending",
               },
             ],
@@ -551,8 +547,6 @@ describe("ChatComposer", () => {
               {
                 stepId: "1",
                 title: "Inspect the repository",
-                description: "Review the current files",
-                completionCriteria: "Context is collected",
                 status: "done",
               },
             ],
@@ -592,15 +586,11 @@ describe("ChatComposer", () => {
               {
                 stepId: "1",
                 title: "Inspect the repository",
-                description: "Review the current files",
-                completionCriteria: "Context is collected",
                 status: "running",
               },
               {
                 stepId: "2",
                 title: "Ship the fix",
-                description: "Patch the bug",
-                completionCriteria: "Change is merged",
                 status: "pending",
               },
             ],
@@ -626,15 +616,11 @@ describe("ChatComposer", () => {
               {
                 stepId: "1",
                 title: "Inspect the repository",
-                description: "Review the current files",
-                completionCriteria: "Context is collected",
                 status: "done",
               },
               {
                 stepId: "2",
                 title: "Ship the fix",
-                description: "Patch the bug",
-                completionCriteria: "Change is merged",
                 status: "done",
               },
             ],
@@ -666,15 +652,11 @@ describe("ChatComposer", () => {
               {
                 stepId: "1",
                 title: "Inspect the repository",
-                description: "Review the current files",
-                completionCriteria: "Context is collected",
                 status: "done",
               },
               {
                 stepId: "2",
                 title: "Ship the fix",
-                description: "Patch the bug",
-                completionCriteria: "Change is merged",
                 status: "running",
               },
             ],

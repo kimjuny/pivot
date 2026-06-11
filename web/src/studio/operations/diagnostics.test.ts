@@ -18,7 +18,7 @@ function buildTask(overrides: Partial<OperationsTaskMessage>): OperationsTaskMes
     status: "running",
     total_tokens: 120,
     pending_user_action: null,
-    current_plan: [],
+    current_steps: [],
     recursions: [],
     created_at: "2026-03-30T10:00:00Z",
     updated_at: "2026-03-30T10:00:00Z",

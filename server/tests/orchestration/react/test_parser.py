@@ -45,10 +45,6 @@ class ReactParserTestCase(unittest.TestCase):
   "thinking_next_turn": true,
   "action": {
     "action_type": "CALL_TOOL",
-    "step_id": "1",
-    "step_status_update": [
-      {"step_id": "1", "status": "RUNNING"}
-    ],
     "output": {
       "tool_calls": [
         {
@@ -77,7 +73,6 @@ class ReactParserTestCase(unittest.TestCase):
         self.assertEqual(decision.action.action_type, "CALL_TOOL")
         self.assertEqual(decision.message, "Reading the requested file")
         self.assertIs(decision.thinking_next_turn, True)
-        self.assertEqual(decision.action.step_id, "1")
         self.assertEqual(len(decision.action.tool_calls), 1)
         self.assertEqual(decision.action.tool_calls[0].batch, 2)
         self.assertEqual(
@@ -86,10 +81,6 @@ class ReactParserTestCase(unittest.TestCase):
                 "path": "/tmp/demo.txt",
                 "options": {"encoding": "utf-8"},
             },
-        )
-        self.assertEqual(
-            [item.to_dict() for item in decision.action.step_status_update],
-            [{"step_id": "1", "status": "running"}],
         )
 
     def test_parse_call_tool_tolerates_payload_markdown_fence(self) -> None:
@@ -375,48 +366,6 @@ Everything is ready.
         with self.assertRaisesRegex(ValueError, "Duplicate tool_call id: call-1"):
             parse_react_output(content)
 
-    def test_normalizes_legacy_top_level_step_status_update(self) -> None:
-        """Top-level step-status drift should normalize into action."""
-        content = """
-{
-  "step_status_update": [{"step_id": "1", "status": "done"}],
-  "action": {
-    "action_type": "REFLECT",
-    "output": {}
-  }
-}
-""".strip()
-
-        decision = parse_react_output(content)
-
-        self.assertEqual(
-            [item.to_dict() for item in decision.action.step_status_update],
-            [{"step_id": "1", "status": "done"}],
-        )
-        self.assertNotIn("step_status_update", decision.raw_payload)
-
-    def test_normalizes_action_output_step_status_update(self) -> None:
-        """action.output step-status drift should normalize into action."""
-        content = """
-{
-  "action": {
-    "action_type": "PLAN",
-    "output": {
-      "step_status_update": [{"step_id": "2", "status": "running"}],
-      "plan": []
-    }
-  }
-}
-""".strip()
-
-        decision = parse_react_output(content)
-
-        self.assertEqual(
-            [item.to_dict() for item in decision.action.step_status_update],
-            [{"step_id": "2", "status": "running"}],
-        )
-        self.assertNotIn("step_status_update", decision.action.output)
-
     def test_reject_non_object_tool_arguments(self) -> None:
         """CALL_TOOL arguments must be objects before payload resolution."""
         content = """
@@ -445,33 +394,13 @@ Everything is ready.
         ):
             parse_react_output(content)
 
-    def test_reject_non_list_action_step_status_update(self) -> None:
-        """Step updates must use the canonical list form."""
-        content = """
-{
-  "action": {
-    "action_type": "PLAN",
-    "step_status_update": {"step_id": "1", "status": "done"},
-    "output": {
-      "plan": []
-    }
-  }
-}
-""".strip()
-
-        with self.assertRaisesRegex(
-            ValueError,
-            r"action\.step_status_update must be a list",
-        ):
-            parse_react_output(content)
-
     def test_reject_non_boolean_thinking_next_turn(self) -> None:
         """thinking_next_turn must be a boolean when present."""
         content = """
 {
   "thinking_next_turn": "yes",
   "action": {
-    "action_type": "REFLECT",
+    "action_type": "ANSWER",
     "output": {}
   }
 }

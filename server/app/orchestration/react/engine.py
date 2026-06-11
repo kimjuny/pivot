@@ -61,10 +61,7 @@ from .prompt_template import (
     build_runtime_task_bootstrap_message,
     build_runtime_user_prompt,
 )
-from .runtime_payload import (
-    build_current_plan_payload,
-    build_recursion_user_payload,
-)
+from .runtime_payload import build_recursion_user_payload
 from .types import ParsedReactDecision, ToolCallRequest
 
 # Get logger for this module
@@ -152,6 +149,9 @@ class ReactEngine:
         self._delegation_agents: str = ""
         self._delegation_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._write_tool_locks: dict[str, asyncio.Lock] = {}
+        self._plan_pending_review: bool = False
+        self._prev_steps_json: str = ""
+        self._steps_unchanged_count: int = 0
 
     def _previous_recursion_failed(self, task: ReactTask) -> bool:
         """Return whether the latest persisted recursion ended in failure.
@@ -1530,6 +1530,14 @@ class ReactEngine:
         if tool_call.name == "delegate_to_agent":
             return await self._execute_delegation(tool_call)
 
+        # Plan tool is intercepted for file I/O and approval flow.
+        if tool_call.name == "plan":
+            return await self._execute_plan_tool(tool_call)
+
+        # Task tool is intercepted for file I/O (step tracking).
+        if tool_call.name == "task":
+            return await self._execute_task_tool(tool_call)
+
         try:
             result = await run_in_threadpool(
                 self.tool_manager.execute,
@@ -1703,6 +1711,152 @@ class ReactEngine:
                 "success": False,
             }
 
+    async def _execute_plan_tool(
+        self,
+        tool_call: ToolCallRequest,
+    ) -> dict[str, Any]:
+        """Handle the ``plan`` tool call — engine-intercepted for file I/O.
+
+        The plan tool writes a free-form Markdown file under
+        ``{workspace}/.pivot/plans/{task_id}.md`` and pauses execution for
+        user approval.
+        """
+        from .plan_files import write_plan_text
+
+        if self.tool_execution_context is None:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "No execution context available for plan tool",
+                "success": False,
+            }
+
+        workspace_path = self.tool_execution_context.workspace_backend_path
+        task_id = self._current_task_id
+        if not task_id:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "No active task for plan tool",
+                "success": False,
+            }
+
+        plan_text = tool_call.arguments.get("plan_text")
+
+        try:
+            if plan_text is not None:
+                write_plan_text(workspace_path, task_id, plan_text)
+                self._plan_pending_review = True
+
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "result": {"success": True},
+                "success": True,
+            }
+        except Exception as e:
+            logger.error("Plan tool execution failed: %s", e)
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": f"Plan tool failed: {e!s}",
+                "success": False,
+            }
+
+    async def _execute_task_tool(
+        self,
+        tool_call: ToolCallRequest,
+    ) -> dict[str, Any]:
+        """Handle the ``task`` tool call — engine-intercepted for file I/O.
+
+        The task tool creates or updates structured steps in
+        ``{workspace}/.pivot/plans/{task_id}.json``.
+        """
+        from .plan_files import update_steps, write_steps
+
+        if self.tool_execution_context is None:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "No execution context available for task tool",
+                "success": False,
+            }
+
+        workspace_path = self.tool_execution_context.workspace_backend_path
+        task_id = self._current_task_id
+        if not task_id:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "No active task for task tool",
+                "success": False,
+            }
+
+        action = tool_call.arguments.get("action")
+        steps = tool_call.arguments.get("steps")
+
+        # Some LLMs pass list/object params as JSON strings — normalise.
+        if isinstance(steps, str):
+            try:
+                steps = json.loads(steps)
+            except (json.JSONDecodeError, ValueError):
+                return {
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                    "error": "Invalid JSON in 'steps' parameter",
+                    "success": False,
+                }
+        if steps is not None and not isinstance(steps, list):
+            steps = None
+
+        if action not in ("create", "update"):
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": f"Invalid action '{action}'. Must be 'create' or 'update'.",
+                "success": False,
+            }
+
+        if not steps:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "'steps' parameter is required and must be non-empty.",
+                "success": False,
+            }
+
+        try:
+            if action == "create":
+                write_steps(workspace_path, task_id, steps)
+            else:  # update
+                update_steps(workspace_path, task_id, steps)
+
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "result": {"success": True},
+                "success": True,
+            }
+        except Exception as e:
+            logger.error("Task tool execution failed: %s", e)
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": f"Task tool failed: {e!s}",
+                "success": False,
+            }
+
     def _make_delegation_event_callback(
         self,
     ) -> Any:
@@ -1732,7 +1886,7 @@ class ReactEngine:
 
         Routes LLM response to native tool calling or text-action parsing:
         - Native ``tool_calls`` in the response trigger the CALL_TOOL path.
-        - Text-only responses are parsed as JSON for PLAN/REFLECT/CLARIFY/ANSWER.
+        - Text-only responses are parsed as JSON for CLARIFY/ANSWER.
 
         Args:
             task: The ReactTask being executed.
@@ -1758,7 +1912,7 @@ class ReactEngine:
             parse_error: ValueError | None = None
             request_messages = messages
             native_tool_calls: list[dict[str, Any]] | None = None
-            call_tool_meta: dict[str, Any] | None = None
+            call_tool_message: str = ""
             eager_state: _EagerToolExecutionState | None = None
 
             # Build native tools parameter for all LLM calls in this recursion.
@@ -1798,14 +1952,14 @@ class ReactEngine:
                 # Native tool_calls → CALL_TOOL path.
                 if message.tool_calls:
                     native_tool_calls = message.tool_calls
-                    # Extract message/step_status_update from the JSON
-                    # envelope that accompanies tool calls.
-                    call_tool_meta = self._parse_call_tool_meta(message.content)
+                    # Extract user-facing message from the JSON envelope
+                    # that accompanies native tool calls.
+                    call_tool_message = self._extract_call_tool_message(message.content)
                     logger.debug(
-                        "LLM returned native tool_calls (trace_id=%s, count=%s, has_meta=%s)",
+                        "LLM returned native tool_calls (trace_id=%s, count=%s, has_message=%s)",
                         trace_id,
                         len(native_tool_calls),
-                        bool(call_tool_meta.get("message")),
+                        bool(call_tool_message),
                     )
                     break
 
@@ -1876,10 +2030,10 @@ class ReactEngine:
                     token_meter_queue=token_meter_queue,
                     response=response,
                     eager_state=eager_state,
-                    call_tool_meta=call_tool_meta,
+                    call_tool_message=call_tool_message,
                 )
 
-            # --- Text action path: PLAN / REFLECT / CLARIFY / ANSWER ---
+            # --- Text action path: CLARIFY / ANSWER ---
             assert decision is not None  # guaranteed: native_tool_calls is None
             return self._execute_text_action_recursion(
                 task=task,
@@ -2018,44 +2172,28 @@ class ReactEngine:
         return results_list
 
     @staticmethod
-    def _parse_call_tool_meta(content: str | None) -> dict[str, Any]:
-        """Extract message and step_status_update from a CALL_TOOL JSON envelope.
+    def _extract_call_tool_message(content: str | None) -> str:
+        """Extract the user-facing message from a CALL_TOOL text envelope.
 
         The LLM may emit truncated JSON when text and tool_calls coexist in one
         response, so we use partial parsing instead of ``parse_react_output``
         which requires valid JSON.
-
-        Returns a dict with keys ``message`` (str) and ``step_status_updates``
-        (list[dict]).  Falls back gracefully if the content is absent or not
-        parseable.
         """
         if not content or not content.strip():
-            return {"message": "", "step_status_updates": []}
+            return ""
 
         stripped = content.strip()
-        # Fast path: content doesn't look like JSON → treat as plain text.
         if not stripped.startswith("{"):
-            return {"message": stripped, "step_status_updates": []}
+            return stripped
 
         parsed = try_partial_parse(stripped)
         if parsed is None:
-            return {"message": stripped, "step_status_updates": []}
+            return stripped
 
         message = parsed.get("message")
-        if not isinstance(message, str):
-            # No message key extracted yet (JSON too truncated) → use raw text.
-            return {"message": "", "step_status_updates": []}
-
-        step_updates: list[dict[str, Any]] = []
-        action = parsed.get("action")
-        if isinstance(action, dict):
-            raw_updates = action.get("step_status_update")
-            if isinstance(raw_updates, list):
-                for item in raw_updates:
-                    if isinstance(item, dict):
-                        step_updates.append(item)
-
-        return {"message": message, "step_status_updates": step_updates}
+        if isinstance(message, str):
+            return message
+        return ""
 
     async def _execute_call_tool_recursion(
         self,
@@ -2070,7 +2208,7 @@ class ReactEngine:
         token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
         response: Response,
         eager_state: _EagerToolExecutionState | None = None,
-        call_tool_meta: dict[str, Any] | None = None,
+        call_tool_message: str = "",
     ) -> tuple[ReactRecursion, dict[str, Any]]:
         """Execute native tool calls and build the recursion event.
 
@@ -2152,18 +2290,13 @@ class ReactEngine:
                             {"type": "tool_result", "tool_results": [skipped]}
                         )
 
-        meta = call_tool_meta or {}
-        ct_message = meta.get("message", "")
-        ct_step_updates = meta.get("step_status_updates", [])
-
         tokens_data = self.state_service.record_llm_decision(
             task=task,
             recursion=recursion,
             thinking=message.reasoning_content,
             action_type="CALL_TOOL",
             action_output=action_output,
-            action_step_id=None,
-            message=ct_message,
+            message=call_tool_message,
             token_counter=token_counter,
         )
 
@@ -2173,8 +2306,7 @@ class ReactEngine:
             context=context,
             action_type="CALL_TOOL",
             action_output=action_output,
-            step_status_updates=ct_step_updates,
-            message=ct_message,
+            message=call_tool_message,
             tool_results=tool_results,
             pending_user_action=pending_user_action,
         )
@@ -2185,7 +2317,7 @@ class ReactEngine:
             "trace_id": trace_id,
             "action_type": "CALL_TOOL",
             "llm_response_id": response.id,
-            "message": ct_message,
+            "message": call_tool_message,
             "thinking": message.reasoning_content,
             "session_title": "",
             "output": action_output,
@@ -2194,15 +2326,13 @@ class ReactEngine:
             "tool_calls": reconstructed_tool_calls,
             "tool_results": tool_results,
             "pending_user_action": pending_user_action,
-            "step_status_update": ct_step_updates,
-            "current_plan": build_current_plan_payload(context),
         }
         if tokens_data is not None:
             event_data["tokens"] = tokens_data
         return recursion, event_data
 
     # ------------------------------------------------------------------
-    # Text action path (PLAN / REFLECT / CLARIFY / ANSWER)
+    # Text action path (CLARIFY / ANSWER)
     # ------------------------------------------------------------------
 
     def _execute_text_action_recursion(
@@ -2217,7 +2347,7 @@ class ReactEngine:
         token_counter: dict[str, int],
         response: Response,
     ) -> tuple[ReactRecursion, dict[str, Any]]:
-        """Handle a text-only action (PLAN / REFLECT / CLARIFY / ANSWER)."""
+        """Handle a text-only action (CLARIFY / ANSWER)."""
         thinking = message.reasoning_content
         message_text = decision.message
         action = decision.action
@@ -2231,7 +2361,6 @@ class ReactEngine:
                 action_output=action_output,
             )
 
-        action_step_id = action.step_id
         session_title = ""
         if action_type == "ANSWER":
             session_title = action_output.get("session_title") or ""
@@ -2242,14 +2371,9 @@ class ReactEngine:
             thinking=thinking,
             action_type=action_type,
             action_output=action_output,
-            action_step_id=action_step_id,
             message=message_text,
             token_counter=token_counter,
         )
-
-        step_status_updates_validated = [
-            item.to_dict() for item in action.step_status_update
-        ]
 
         self.state_service.finalize_success(
             task=task,
@@ -2257,7 +2381,6 @@ class ReactEngine:
             context=context,
             action_type=action_type,
             action_output=action_output,
-            step_status_updates=step_status_updates_validated,
             message=message_text,
             tool_results=[],
             pending_user_action=None,
@@ -2277,8 +2400,6 @@ class ReactEngine:
             "tool_calls": [],
             "tool_results": [],
             "pending_user_action": None,
-            "step_status_update": step_status_updates_validated,
-            "current_plan": build_current_plan_payload(context),
         }
         if tokens_data is not None:
             event_data["tokens"] = tokens_data
@@ -2433,6 +2554,9 @@ class ReactEngine:
         try:
             self._current_task_delegation_depth = task.delegation_depth
             self._current_task_id = task.task_id
+            self._plan_pending_review = False
+            self._prev_steps_json = ""
+            self._steps_unchanged_count = 0
             while task.iteration < task.max_iteration:
                 runtime_state = self.runtime_service.load(task)
                 context = self.state_service.load_context(task)
@@ -2464,6 +2588,15 @@ class ReactEngine:
                     attachments=pending_turn_attachments,
                     after_compaction=runtime_state.compact_result is not None,
                     user_intent_override=user_intent_override,
+                    workspace_path=self.tool_execution_context.workspace_backend_path
+                    if self.tool_execution_context
+                    else None,
+                    previous_steps_json=self._prev_steps_json or None,
+                    system_feedback=(
+                        "Steps have not been updated for 8 consecutive iterations"
+                        if self._steps_unchanged_count >= 8
+                        else None
+                    ),
                 )
                 preview_content_blocks = (
                     list(self._pending_multimodal_blocks)
@@ -2499,6 +2632,15 @@ class ReactEngine:
                         attachments=pending_turn_attachments,
                         after_compaction=runtime_state.compact_result is not None,
                         user_intent_override=user_intent_override,
+                        workspace_path=self.tool_execution_context.workspace_backend_path
+                        if self.tool_execution_context
+                        else None,
+                        previous_steps_json=self._prev_steps_json or None,
+                        system_feedback=(
+                            "Steps have not been updated for 8 consecutive iterations"
+                            if self._steps_unchanged_count >= 8
+                            else None
+                        ),
                     )
 
                 trace_id = str(uuid.uuid4())
@@ -2907,7 +3049,6 @@ class ReactEngine:
                         "updated_at": recursion.updated_at.isoformat(),
                         "tokens": event_data.get("tokens"),
                         "data": {
-                            "current_plan": event_data.get("current_plan", []),
                             "session_title": event_data.get("session_title", ""),
                         },
                     }
@@ -3014,30 +3155,6 @@ class ReactEngine:
 
                         self.state_service.advance_iteration(task)
                         break
-
-                elif action_type == "PLAN":
-                    plan_output = event_data.get("output")
-                    yield {
-                        "type": "plan_update",
-                        "task_id": task.task_id,
-                        "trace_id": event_data.get("trace_id"),
-                        "iteration": task.iteration,
-                        "data": plan_output,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    }
-
-                elif action_type == "REFLECT":
-                    # REFLECT action: organizing thoughts without changing structure
-                    # Just emit the reflect event and continue to next iteration
-                    reflect_output = event_data.get("output")
-                    yield {
-                        "type": "reflect",
-                        "task_id": task.task_id,
-                        "trace_id": event_data.get("trace_id"),
-                        "iteration": task.iteration,
-                        "data": reflect_output,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    }
 
                 elif action_type == "CLARIFY":
                     yield {
@@ -3147,8 +3264,57 @@ class ReactEngine:
                         self.state_service.advance_iteration(task)
                     continue
 
+                # Plan review: pause the loop for user approval of a new plan.
+                if self._plan_pending_review:
+                    self._plan_pending_review = False
+                    from .plan_files import read_plan_text
+
+                    workspace_path = (
+                        self.tool_execution_context.workspace_backend_path
+                        if self.tool_execution_context
+                        else ""
+                    )
+                    plan_text = (
+                        read_plan_text(workspace_path, task.task_id)
+                        if workspace_path
+                        else None
+                    )
+
+                    yield {
+                        "type": "plan_review",
+                        "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
+                        "iteration": task.iteration,
+                        "data": {
+                            "plan_text": plan_text,
+                        },
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                    self.state_service.advance_iteration(task)
+                    # Store marker so supervisor can identify plan_review pause.
+                    task.pending_user_action_json = json.dumps({"type": "plan_review"})
+                    self.state_service._set_task_status(task, "waiting_input")
+                    break
+
                 # Update iteration count
                 self.state_service.advance_iteration(task)
+
+                # Track steps-unchanged streak for stale-step warning.
+                if self.tool_execution_context and self._current_task_id:
+                    _ws = self.tool_execution_context.workspace_backend_path
+                    from .plan_files import plan_exists as _pe, read_steps as _rs
+
+                    if _pe(_ws, self._current_task_id):
+                        import json as _json
+
+                        _cur = _json.dumps(
+                            _rs(_ws, self._current_task_id), sort_keys=True
+                        )
+                        if _cur == self._prev_steps_json:
+                            self._steps_unchanged_count += 1
+                        else:
+                            self._steps_unchanged_count = 0
+                            self._prev_steps_json = _cur
 
             # Clean up stale user_input queue items now that the task is terminal.
             if task.session_id:

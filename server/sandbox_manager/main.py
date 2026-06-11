@@ -1467,7 +1467,12 @@ def _run_git_in_sandbox(
     git_args: list[str],
 ) -> tuple[int, str, str]:
     """Run a git command in the sandbox using the hidden pivot git-dir."""
-    cmd = ["git", "--git-dir=/workspace/.pivot/git", "--work-tree=/workspace", *git_args]
+    cmd = [
+        "git",
+        "--git-dir=/workspace/.pivot/git",
+        "--work-tree=/workspace",
+        *git_args,
+    ]
     result = container.exec_run(
         cmd,
         workdir="/workspace",
@@ -1510,14 +1515,19 @@ def checkpoint_sandbox(payload: SandboxRequest) -> SandboxCheckpointResponse:
     _touch_container(name)
 
     # Initialize hidden git repo if needed
-    exit_code, stdout, stderr = _run_git_in_sandbox(container, ["status", "--porcelain"])
+    exit_code, stdout, stderr = _run_git_in_sandbox(
+        container, ["status", "--porcelain"]
+    )
     if exit_code != 0 and "not a git repository" in (stdout + stderr).lower():
         # Create git-dir parent and workspace-level gitignore before init
         container.exec_run(
-            ["sh", "-c",
-             "mkdir -p /workspace/.pivot/git && "
-             "printf 'node_modules/\\n__pycache__/\\n.git/\\n*.pyc\\n.pivot/\\n' "
-             "> /workspace/.gitignore"],
+            [
+                "sh",
+                "-c",
+                "mkdir -p /workspace/.pivot/git && "
+                "printf 'node_modules/\\n__pycache__/\\n.git/\\n*.pyc\\n.pivot/\\n' "
+                "> /workspace/.gitignore",
+            ],
             workdir="/workspace",
             demux=True,
             tty=False,
@@ -1551,9 +1561,7 @@ def checkpoint_sandbox(payload: SandboxRequest) -> SandboxCheckpointResponse:
         )
 
     # Get the commit hash
-    exit_code, stdout, stderr = _run_git_in_sandbox(
-        container, ["rev-parse", "HEAD"]
-    )
+    exit_code, stdout, stderr = _run_git_in_sandbox(container, ["rev-parse", "HEAD"])
     if exit_code != 0:
         raise HTTPException(
             status_code=500,
@@ -1589,7 +1597,9 @@ def restore_sandbox(payload: SandboxRestoreRequest) -> SandboxRestoreResponse:
     exit_code, stdout, _ = _run_git_in_sandbox(
         container, ["diff", "--name-only", payload.commit_hash, "HEAD"]
     )
-    changed_files = [f for f in stdout.strip().split("\n") if f] if exit_code == 0 else []
+    changed_files = (
+        [f for f in stdout.strip().split("\n") if f] if exit_code == 0 else []
+    )
 
     # Hard reset to target commit
     exit_code, stdout, stderr = _run_git_in_sandbox(

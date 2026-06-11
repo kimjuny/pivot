@@ -146,7 +146,7 @@ class ReactEngineCompactionTestCase(unittest.TestCase):
                 "trace_id": "trace-1",
                 "iteration": 1,
                 "user_intent": "Investigate the bug",
-                "current_plan": [],
+                "current_steps": [],
             },
         )
         self.runtime_service.append_assistant_message(
@@ -215,7 +215,7 @@ class ReactEngineCompactionTestCase(unittest.TestCase):
                             "trace_id": "trace-1",
                             "iteration": 1,
                             "user_intent": "Investigate the bug",
-                            "current_plan": [],
+                            "current_steps": [],
                         },
                         ensure_ascii=False,
                     ),
@@ -407,7 +407,7 @@ class ReactEngineCompactionTestCase(unittest.TestCase):
             {
                 "iteration": 1,
                 "user_intent": "Write a long report",
-                "current_plan": [],
+                "current_steps": [],
             },
         )
         self.runtime_service.append_assistant_message(
@@ -445,7 +445,7 @@ class ReactEngineCompactionTestCase(unittest.TestCase):
                         {
                             "iteration": 1,
                             "user_intent": "Write a long report",
-                            "current_plan": [],
+                            "current_steps": [],
                         },
                         ensure_ascii=False,
                     ),

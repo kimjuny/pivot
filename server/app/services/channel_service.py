@@ -931,13 +931,13 @@ class ChannelService:
             event_type = event_data.get("type")
             if event_type == "message":
                 summary_data = event_data.get("data")
-                current_plan = (
-                    summary_data.get("current_plan", [])
+                current_steps = (
+                    summary_data.get("current_steps", [])
                     if isinstance(summary_data, dict)
                     else []
                 )
                 progress_view = self._build_channel_progress_view(
-                    current_plan=current_plan,
+                    current_steps=current_steps,
                     fallback_message=str(event_data.get("delta") or "").strip(),
                 )
                 progress_text = (
@@ -1154,49 +1154,38 @@ class ChannelService:
     def _build_channel_progress_view(
         self,
         *,
-        current_plan: Any,
+        current_steps: Any,
         fallback_message: str | None,
     ) -> ChannelProgressView | None:
-        """Convert the current plan payload into a transport-neutral view."""
+        """Convert the current steps payload into a transport-neutral view."""
         from app.channels.types import (
             ChannelPlanStepProgressView,
             ChannelProgressView,
         )
 
         message = (fallback_message or "").strip() or None
-        if not isinstance(current_plan, list) or not current_plan:
+        if not isinstance(current_steps, list) or not current_steps:
             if message is None:
                 return None
             return ChannelProgressView(mode="text", summary=message)
 
         steps: list[ChannelPlanStepProgressView] = []
-        for step in current_plan:
+        for step in current_steps:
             if not isinstance(step, dict):
                 continue
             step_id = step.get("step_id")
-            general_goal = step.get("general_goal")
+            title = step.get("title")
             status = step.get("status")
-            if not isinstance(step_id, str) or not isinstance(general_goal, str):
+            if not isinstance(step_id, str) or not isinstance(title, str):
                 continue
             if not isinstance(status, str) or not status:
                 status = "pending"
 
-            summaries: list[str] = []
-            raw_history = step.get("recursion_history")
-            if isinstance(raw_history, list):
-                for history_entry in raw_history:
-                    if not isinstance(history_entry, dict):
-                        continue
-                    entry_message = history_entry.get("message")
-                    if isinstance(entry_message, str) and entry_message.strip():
-                        summaries.append(entry_message.strip())
-
             steps.append(
                 ChannelPlanStepProgressView(
                     step_id=step_id,
-                    general_goal=general_goal,
+                    title=title,
                     status=status,
-                    summaries=summaries,
                 )
             )
 
@@ -1230,11 +1219,8 @@ class ChannelService:
             # channel providers render streamed markdown inconsistently, which can
             # collapse mixed list/paragraph blocks into messy layouts.
             lines.append(
-                f"[{self._channel_progress_status_label(step.status)}] "
-                f"{step.general_goal}"
+                f"[{self._channel_progress_status_label(step.status)}] " f"{step.title}"
             )
-            for item in step.summaries:
-                lines.append(f"Progress: {item}")
             lines.append("")
 
         return "\n".join(lines).strip()

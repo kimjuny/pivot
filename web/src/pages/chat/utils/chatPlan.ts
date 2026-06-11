@@ -11,7 +11,7 @@ interface PlanEventPayload {
 }
 
 interface MessageEventPayload {
-  current_plan?: PlanStepData[];
+  current_steps?: PlanStepData[];
 }
 
 const DONE_PLAN_STATUSES = new Set(["done", "completed"]);
@@ -68,7 +68,7 @@ export function deriveTaskPlanSnapshot(
     };
   }
 
-  const persistedPlan = normalizePlanSteps(message.currentPlan);
+  const persistedPlan = normalizePlanSteps(message.currentSteps);
   if (persistedPlan.length === 0) {
     return null;
   }
@@ -114,7 +114,7 @@ function extractPlanStepsFromEvent(
   }
 
   if (event.type === "message") {
-    return normalizePlanSteps(asMessageEventPayload(event.data)?.current_plan);
+    return normalizePlanSteps(asMessageEventPayload(event.data)?.current_steps);
   }
 
   return [];
@@ -130,24 +130,24 @@ function normalizePlanSteps(rawSteps: PlanStepData[] | undefined): TaskPlanStep[
 
   return rawSteps
     .filter((step): step is PlanStepData => {
+      const legacyTitle = (step as unknown as Record<string, unknown>)?.title;
       return (
         typeof step?.step_id === "string" &&
-        typeof step?.general_goal === "string" &&
-        typeof step?.specific_description === "string" &&
-        typeof step?.completion_criteria === "string" &&
+        typeof (step?.subject ?? legacyTitle) === "string" &&
         typeof step?.status === "string"
       );
     })
-    .map((step, index) => ({
-      stepId: step.step_id || String(index + 1),
-      title:
-        step.general_goal.trim() ||
-        step.specific_description.trim() ||
-        `Step ${index + 1}`,
-      description: step.specific_description.trim(),
-      completionCriteria: step.completion_criteria.trim(),
-      status: normalizeTaskPlanStatus(step.status),
-    }));
+    .map((step, index) => {
+      const legacyTitle = (step as unknown as Record<string, unknown>)?.title;
+      const label = (step.subject ?? legacyTitle ?? "").toString().trim() || `Step ${index + 1}`;
+      const desc = step.description?.trim() || undefined;
+      return {
+        stepId: step.step_id || String(index + 1),
+        title: label,
+        description: desc,
+        status: normalizeTaskPlanStatus(step.status),
+      };
+    });
 }
 
 /**

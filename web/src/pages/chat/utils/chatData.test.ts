@@ -82,7 +82,7 @@ describe("buildMessagesFromHistory", () => {
         agent_answer: null,
         status: "running",
         total_tokens: 0,
-        current_plan: [],
+        current_steps: [],
         recursions: [
           {
             iteration: 0,
@@ -122,7 +122,7 @@ describe("buildMessagesFromHistory", () => {
         agent_answer: null,
         status: "cancelled",
         total_tokens: 0,
-        current_plan: [],
+        current_steps: [],
         recursions: [
           {
             iteration: 0,
@@ -164,7 +164,7 @@ describe("buildMessagesFromHistory", () => {
         agent_answer: null,
         status: "waiting_input",
         total_tokens: 0,
-        current_plan: [],
+        current_steps: [],
         recursions: [
           {
             iteration: 0,
@@ -220,7 +220,7 @@ describe("buildMessagesFromHistory", () => {
         agent_answer: "Created the report.",
         status: "completed",
         total_tokens: 0,
-        current_plan: [],
+        current_steps: [],
         recursions: [],
         created_at: "2026-03-16T00:00:00.000Z",
         updated_at: "2026-03-16T00:00:02.000Z",
@@ -251,7 +251,7 @@ describe("buildMessagesFromHistory", () => {
         agent_answer: null,
         status: "running",
         total_tokens: 0,
-        current_plan: [],
+        current_steps: [],
         recursions: [
           {
             iteration: 0,
@@ -297,7 +297,7 @@ describe("buildMessagesFromHistory", () => {
         agent_answer: "I created the PowerPoint export.",
         status: "completed",
         total_tokens: 30,
-        current_plan: [],
+        current_steps: [],
         recursions: [
           {
             iteration: 0,
@@ -362,7 +362,7 @@ describe("buildMessagesFromHistory", () => {
         agent_answer: null,
         status: "failed",
         total_tokens: 0,
-        current_plan: [],
+        current_steps: [],
         recursions: [
           {
             iteration: 0,

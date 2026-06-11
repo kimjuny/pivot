@@ -5,7 +5,7 @@ from app.models.extension import (
     ExtensionInstallation,
 )
 from app.models.file import FileAsset
-from app.models.react import ReactPlanStep, ReactRecursion, ReactTask, ReactTaskEvent
+from app.models.react import ReactRecursion, ReactTask, ReactTaskEvent
 from app.models.user import User
 
 __all__ = [
@@ -14,7 +14,6 @@ __all__ = [
     "ExtensionHookExecution",
     "ExtensionInstallation",
     "FileAsset",
-    "ReactPlanStep",
     "ReactRecursion",
     "ReactTask",
     "ReactTaskEvent",

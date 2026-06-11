@@ -13,7 +13,9 @@ import type {
   ChatPendingUserAction,
   RecursionRecord,
   ReactStreamEvent,
+  SkillChangeApprovalRequest,
   TokenUsage,
+  PlanReviewState,
 } from "../types";
 import { toPendingUserAction } from "./chatSelectors";
 
@@ -261,7 +263,8 @@ function buildAssistantContent(task: TaskMessage): string {
       ? toPendingUserAction(task.pending_user_action)
       : undefined;
   if (pendingUserAction?.kind === "skill_change_approval") {
-    const { question, message } = pendingUserAction.approvalRequest;
+    const request = pendingUserAction.approvalRequest as SkillChangeApprovalRequest;
+    const { question, message } = request;
     return message && message.trim().length > 0
       ? `${question}\n\n${message}`
       : question;
@@ -440,23 +443,6 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         }
       }
 
-      if (
-        recursion.action_type === "PLAN" &&
-        recursion.action_output
-      ) {
-        const planData = parseJson(recursion.action_output);
-        if (planData !== null) {
-          events.push({
-            type: "plan_update",
-            task_id: task.task_id,
-            trace_id: recursion.trace_id,
-            iteration: recursion.iteration,
-            data: planData,
-            timestamp: recursion.updated_at,
-          });
-        }
-      }
-
       if (recursion.action_type === "CLARIFY" && recursion.action_output) {
         const clarifyData = parseJson(recursion.action_output);
         if (clarifyData !== null) {
@@ -551,6 +537,31 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
     }
     const hasMidTaskInputs = midTaskInputs.some((v) => v !== undefined);
 
+    // Build persistent planReview state
+    let planReview: PlanReviewState | undefined;
+    if (
+      pendingUserAction?.kind === "plan_review" &&
+      pendingUserAction.approvalRequest &&
+      "plan_text" in pendingUserAction.approvalRequest
+    ) {
+      const pr = pendingUserAction.approvalRequest as {
+        plan_text: string | null;
+      };
+      planReview = {
+        plan_text: pr.plan_text ?? "",
+        approved: false,
+      };
+    } else if (
+      task.current_steps &&
+      task.current_steps.length > 0 &&
+      task.status !== "failed"
+    ) {
+      planReview = {
+        plan_text: "",
+        approved: true,
+      };
+    }
+
     const clarifySegments = task.recursions
       .map((recursion, index) => ({
         index,
@@ -565,6 +576,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
 
     if (clarifySegments.length === 0) {
       const aggregatedTaskTokens = sumRecursionTokens(recursions);
+
       loadedMessages.push({
         id: getCanonicalChatMessageId("assistant", task.task_id),
         role: "assistant",
@@ -577,7 +589,8 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         timestamp: task.updated_at,
         task_id: task.task_id,
         pendingUserAction,
-        currentPlan: task.current_plan,
+        currentSteps: task.current_steps,
+        planReview,
         recursions,
         midTaskInputs: hasMidTaskInputs ? midTaskInputs : undefined,
         status: getTaskAssistantStatus(task),
@@ -615,7 +628,8 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         timestamp: sourceRecursion.updated_at,
         task_id: task.task_id,
         pendingUserAction: waitingForThisClarify ? pendingUserAction : undefined,
-        currentPlan: task.current_plan,
+        currentSteps: task.current_steps,
+        planReview,
         recursions: segmentRecursions,
         status: waitingForThisClarify ? "waiting_input" : "completed",
         totalTokens: segmentTokens,
@@ -660,7 +674,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         ),
         timestamp: task.updated_at,
         task_id: task.task_id,
-        currentPlan: task.current_plan,
+        currentSteps: task.current_steps,
         recursions: remainingRecursions,
         status: getTaskAssistantStatus(task),
         totalTokens: {

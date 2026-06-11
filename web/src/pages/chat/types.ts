@@ -156,7 +156,7 @@ export type ReactStreamEventType =
   | "answer_delta"
   | "tool_result"
   | "plan_update"
-  | "reflect"
+  | "plan_review"
   | "answer"
   | "clarify"
   | "task_cancelled"
@@ -198,18 +198,13 @@ export interface ReactStreamEvent {
 }
 
 /**
- * Plan step payload emitted by PLAN output.
+ * Plan step payload from the task tool's structured JSON file.
  */
 export interface PlanStepData {
   step_id: string;
-  general_goal: string;
-  specific_description: string;
-  completion_criteria: string;
+  subject: string;
+  description?: string;
   status: string;
-  recursion_history?: Array<{
-    iteration?: number | null;
-    message: string;
-  }>;
 }
 
 /**
@@ -223,8 +218,7 @@ export type TaskPlanStepStatus = "pending" | "running" | "done" | "error";
 export interface TaskPlanStep {
   stepId: string;
   title: string;
-  description: string;
-  completionCriteria: string;
+  description?: string;
   status: TaskPlanStepStatus;
 }
 
@@ -236,6 +230,23 @@ export interface TaskPlanSnapshot {
   taskId?: string;
   taskStatus?: ChatMessage["status"];
   steps: TaskPlanStep[];
+}
+
+/**
+ * Plan review data carried by the plan_review SSE event.
+ */
+export interface PlanReviewData {
+  plan_text: string | null;
+}
+
+/**
+ * Persistent plan review state attached to a message.
+ * Survives approval so the rendered plan remains visible throughout the task.
+ */
+export interface PlanReviewState {
+  plan_text: string;
+  /** false = waiting for user decision, true = approved/edit-approved. */
+  approved: boolean;
 }
 
 /**
@@ -263,13 +274,13 @@ export interface SkillChangeApprovalRequest {
  *
  * ``kind`` is a string discriminator so new action types can be added without
  * extending this union.  Known types: ``"skill_change_approval"``,
- * ``"propose_automation"``.
+ * ``"plan_review"``, ``"propose_automation"``.
  */
 export interface ChatPendingUserAction {
   /** Stable action kind so the UI can dispatch the correct controls. */
   kind: string;
-  /** Structured approval request for one staged skill submission. */
-  approvalRequest: SkillChangeApprovalRequest;
+  /** Structured approval request (shape depends on ``kind``). */
+  approvalRequest: SkillChangeApprovalRequest | PlanReviewData;
 }
 
 /**
@@ -374,8 +385,10 @@ export interface ChatMessage {
   assistantAttachments?: AssistantAttachment[];
   timestamp: string;
   task_id?: string;
-  /** Latest current-plan snapshot attached to this task, when available. */
-  currentPlan?: PlanStepData[];
+  /** Latest current-steps snapshot attached to this task, when available. */
+  currentSteps?: PlanStepData[];
+  /** Persistent plan review state — survives approval for continued display. */
+  planReview?: PlanReviewState;
   recursions?: RecursionRecord[];
   /** Mid-task user inputs injected between iterations (sparse: index maps to recursion index). */
   midTaskInputs?: ({ message: string; timestamp: string } | undefined)[];

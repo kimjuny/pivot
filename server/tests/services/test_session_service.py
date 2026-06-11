@@ -20,7 +20,6 @@ if str(SERVER_ROOT) not in sys.path:
 
 import_module("app.models.llm")
 Agent = import_module("app.models.agent").Agent
-ReactPlanStep = import_module("app.models.react").ReactPlanStep
 ReactRecursion = import_module("app.models.react").ReactRecursion
 ReactRecursionState = import_module("app.models.react").ReactRecursionState
 ReactTask = import_module("app.models.react").ReactTask
@@ -115,107 +114,6 @@ class SessionServiceTestCase(unittest.TestCase):
             {"posix_workspace": provider},
         )()
         return temp_dir, profile
-
-    def test_full_history_uses_latest_snapshot_current_plan(self) -> None:
-        """History payload should expose the latest persisted current-plan snapshot."""
-        task = ReactTask(
-            task_id="task-1",
-            session_id="session-1",
-            agent_id=self.agent.id or 0,
-            user="alice",
-            user_message="Inspect the repo",
-            user_intent="Inspect the repo",
-            status="running",
-        )
-        self.session.add(task)
-        self.session.commit()
-        self.session.refresh(task)
-
-        snapshot = ReactRecursionState(
-            trace_id="trace-1",
-            task_id=task.task_id,
-            iteration_index=2,
-            current_state=json.dumps(
-                {
-                    "global": {"task_id": task.task_id},
-                    "current_recursion": {},
-                    "context": {
-                        "plan": [
-                            {
-                                "step_id": "1",
-                                "general_goal": "Inspect the repository",
-                                "specific_description": "Review the current files",
-                                "completion_criteria": "Context is collected",
-                                "status": "done",
-                                "recursion_history": [
-                                    {
-                                        "iteration": 2,
-                                        "message": "Repository inspection is complete",
-                                    }
-                                ],
-                            },
-                            {
-                                "step_id": "2",
-                                "general_goal": "Ship the fix",
-                                "specific_description": "Patch the bug",
-                                "completion_criteria": "Change is merged",
-                                "status": "running",
-                                "recursion_history": [],
-                            },
-                        ]
-                    },
-                    "recursion_history": [],
-                },
-                ensure_ascii=False,
-            ),
-        )
-        self.session.add(snapshot)
-        self.session.commit()
-
-        history = self.service.get_full_session_history("session-1")
-
-        self.assertEqual(len(history["tasks"]), 1)
-        self.assertEqual(history["tasks"][0]["current_plan"][0]["status"], "done")
-        self.assertEqual(history["tasks"][0]["current_plan"][1]["status"], "running")
-        self.assertEqual(
-            history["tasks"][0]["current_plan"][0]["recursion_history"][0]["message"],
-            "Repository inspection is complete",
-        )
-
-    def test_full_history_falls_back_to_plan_rows_without_snapshot(self) -> None:
-        """Plan rows should still surface when no snapshot has been written yet."""
-        task = ReactTask(
-            task_id="task-2",
-            session_id="session-1",
-            agent_id=self.agent.id or 0,
-            user="alice",
-            user_message="Plan the work",
-            user_intent="Plan the work",
-            status="running",
-        )
-        self.session.add(task)
-        self.session.commit()
-        self.session.refresh(task)
-
-        self.session.add(
-            ReactPlanStep(
-                task_id=task.task_id,
-                react_task_id=task.id or 0,
-                step_id="1",
-                general_goal="Inspect the repository",
-                specific_description="Review the current files",
-                completion_criteria="Context is collected",
-                status="pending",
-            )
-        )
-        self.session.commit()
-
-        history = self.service.get_full_session_history("session-1")
-
-        self.assertEqual(len(history["tasks"]), 1)
-        self.assertEqual(history["tasks"][0]["current_plan"][0]["step_id"], "1")
-        self.assertEqual(history["tasks"][0]["current_plan"][0]["status"], "pending")
-        self.assertEqual(history["tasks"][0]["current_plan"][0]["recursion_history"], [])
 
     def test_operations_diagnostics_summarize_attention_and_latest_error(self) -> None:
         """Operations diagnostics should surface task pressure and newest errors."""

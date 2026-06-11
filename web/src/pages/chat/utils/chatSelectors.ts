@@ -144,19 +144,30 @@ export function toSkillChangeApprovalRequest(
 export function toPendingUserAction(
   value: unknown,
 ): ChatPendingUserAction | undefined {
-  if (!isRecord(value) || value.kind !== "skill_change_approval") {
+  if (!isRecord(value)) {
     return undefined;
   }
 
-  const approvalRequest = toSkillChangeApprovalRequest(value.approval_request);
-  if (!approvalRequest) {
-    return undefined;
+  if (value.kind === "plan_review") {
+    const planText = typeof value.plan_text === "string" ? value.plan_text : null;
+    return {
+      kind: "plan_review",
+      approvalRequest: { plan_text: planText },
+    };
   }
 
-  return {
-    kind: "skill_change_approval",
-    approvalRequest,
-  };
+  if (value.kind === "skill_change_approval") {
+    const approvalRequest = toSkillChangeApprovalRequest(value.approval_request);
+    if (!approvalRequest) {
+      return undefined;
+    }
+    return {
+      kind: "skill_change_approval",
+      approvalRequest,
+    };
+  }
+
+  return undefined;
 }
 
 /**
@@ -179,7 +190,7 @@ export function extractSkillChangeApprovalRequest(
   message: ChatMessage,
 ): SkillChangeApprovalRequest | undefined {
   if (message.pendingUserAction?.kind === "skill_change_approval") {
-    return message.pendingUserAction.approvalRequest;
+    return message.pendingUserAction.approvalRequest as SkillChangeApprovalRequest;
   }
   return undefined;
 }

@@ -9,13 +9,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from app.models.react import (
-    ReactPlanStep,
     ReactRecursion,
     ReactRecursionState,
     ReactTask,
 )
 from app.services.session_service import SessionService
-from sqlmodel import Session as DBSession, col, delete, select
+from sqlmodel import Session as DBSession
 
 if TYPE_CHECKING:
     from app.orchestration.react.context import ReactContext
@@ -90,7 +89,6 @@ class ReactStateService:
         thinking: str | None,
         action_type: str,
         action_output: dict[str, Any],
-        action_step_id: str | None,
         message: str,
         token_counter: dict[str, int],
     ) -> dict[str, int] | None:
@@ -102,7 +100,6 @@ class ReactStateService:
             thinking: Raw provider reasoning content, if available.
             action_type: Final normalized action type.
             action_output: Parsed action output payload before tool results.
-            action_step_id: Optional plan step associated with this recursion.
             message: User-facing progress note.
             token_counter: Aggregated token usage for the recursion.
 
@@ -114,12 +111,6 @@ class ReactStateService:
         recursion.thinking = thinking
         recursion.action_type = action_type
         recursion.action_output = json.dumps(raw_action_output, ensure_ascii=False)
-        recursion.plan_step_id = self._resolve_plan_step_id(
-            task=task,
-            action_type=action_type,
-            action_step_id=action_step_id,
-            trace_id=recursion.trace_id,
-        )
 
         if message:
             recursion.message = message
@@ -138,7 +129,6 @@ class ReactStateService:
         context: ReactContext,
         action_type: str,
         action_output: dict[str, Any],
-        step_status_updates: list[dict[str, str]],
         message: str,
         tool_results: list[dict[str, Any]],
         pending_user_action: dict[str, Any] | None = None,
@@ -152,7 +142,6 @@ class ReactStateService:
             action_type: Final normalized action type.
             action_output: Mutable action output payload. Tool results may be
                 merged into it for snapshot/event consistency.
-            step_status_updates: Validated step status updates.
             message: User-facing progress note.
             tool_results: Executed tool results for this recursion.
             pending_user_action: Optional system-owned waiting action created by
@@ -173,7 +162,6 @@ class ReactStateService:
             recursion=recursion,
             action_type=action_type,
             action_output=action_output,
-            step_status_updates=step_status_updates,
             message=message,
         )
         self._save_snapshot(task, recursion, context)
@@ -226,8 +214,6 @@ class ReactStateService:
         context: ReactContext,
         thinking: str | None,
         action_output: dict[str, Any],
-        action_step_id: str | None,
-        step_status_updates: list[dict[str, str]],
         message: str,
         tool_results: list[dict[str, Any]],
         error_log: str,
@@ -245,12 +231,6 @@ class ReactStateService:
         recursion.thinking = thinking
         recursion.action_type = "CALL_TOOL"
         recursion.action_output = json.dumps(raw_action_output, ensure_ascii=False)
-        recursion.plan_step_id = self._resolve_plan_step_id(
-            task=task,
-            action_type="CALL_TOOL",
-            action_step_id=action_step_id,
-            trace_id=recursion.trace_id,
-        )
         if message:
             recursion.message = message
         if tool_results:
@@ -269,7 +249,6 @@ class ReactStateService:
             recursion=recursion,
             action_type="CALL_TOOL",
             action_output=action_output,
-            step_status_updates=step_status_updates,
             message=message,
         )
         self._save_snapshot(task, recursion, context)
@@ -392,56 +371,6 @@ class ReactStateService:
             "cached_input_tokens": cached_input_tokens,
         }
 
-    def _resolve_plan_step_id(
-        self,
-        task: ReactTask,
-        action_type: str,
-        action_step_id: str | None,
-        trace_id: str,
-    ) -> str | None:
-        """Validate the declared plan step association for a recursion.
-
-        Args:
-            task: Owning task.
-            action_type: Action type produced by the recursion.
-            action_step_id: Declared plan step ID from the model.
-            trace_id: Recursion trace ID for logging.
-
-        Returns:
-            The validated step ID, or `None`.
-        """
-        existing_plan_steps = self.db.exec(
-            select(ReactPlanStep).where(ReactPlanStep.task_id == task.task_id)
-        ).all()
-        plan_is_active = len(existing_plan_steps) > 0
-
-        if plan_is_active and not action_step_id:
-            logger.error(
-                "Action returned without step_id while a plan is active. "
-                "The recursion result will NOT be attributed to any plan step. "
-                "trace_id=%s, task_id=%s, action_type=%s, iteration=%s",
-                trace_id,
-                task.task_id,
-                action_type,
-                task.iteration,
-            )
-            return None
-
-        if action_step_id:
-            known_step_ids = {step.step_id for step in existing_plan_steps}
-            if action_step_id not in known_step_ids:
-                logger.error(
-                    "LLM returned unknown step_id='%s' (known: %s). "
-                    "Saving as-is for debugging; it will not match any plan step. "
-                    "trace_id=%s, task_id=%s",
-                    action_step_id,
-                    sorted(known_step_ids),
-                    trace_id,
-                    task.task_id,
-                )
-
-        return action_step_id
-
     def _merge_tool_results_into_action_output(
         self,
         action_output: dict[str, Any],
@@ -474,10 +403,9 @@ class ReactStateService:
         recursion: ReactRecursion,
         action_type: str,
         action_output: dict[str, Any],
-        step_status_updates: list[dict[str, str]],
         message: str,
     ) -> None:
-        """Apply recursion side effects to the in-memory context before snapshot.
+        """Append current recursion summary to the context history.
 
         Args:
             task: Owning task.
@@ -485,150 +413,6 @@ class ReactStateService:
             recursion: Current recursion row.
             action_type: Final action type.
             action_output: Enriched action output payload.
-            step_status_updates: Validated step status updates.
-            message: User-facing progress note.
-        """
-
-        if action_type == "PLAN":
-            self._replace_plan(task, context, action_output.get("plan", []))
-
-        self._apply_step_status_updates(
-            task, context, recursion.trace_id, step_status_updates
-        )
-        self._link_recursion_to_context(
-            context=context,
-            task=task,
-            recursion=recursion,
-            action_type=action_type,
-            action_output=action_output,
-            step_status_updates=step_status_updates,
-            message=message,
-        )
-
-    def _replace_plan(
-        self,
-        task: ReactTask,
-        context: ReactContext,
-        plan_data: Any,
-    ) -> None:
-        """Replace persisted plan steps and sync the in-memory plan snapshot.
-
-        Args:
-            task: Owning task.
-            context: Mutable context snapshot.
-            plan_data: Raw plan payload from the model.
-        """
-        delete_stmt = delete(ReactPlanStep).where(
-            col(ReactPlanStep.task_id) == task.task_id
-        )
-        self.db.exec(delete_stmt)  # type: ignore[arg-type]
-
-        new_plan_context: list[dict[str, Any]] = []
-        if not isinstance(plan_data, list):
-            context.context["plan"] = new_plan_context
-            return
-
-        for step_data in plan_data:
-            if not isinstance(step_data, dict):
-                continue
-            general_goal = step_data.get("general_goal", "")
-            specific_description = step_data.get("specific_description", "")
-            completion_criteria = step_data.get("completion_criteria", "")
-            step = ReactPlanStep(
-                task_id=task.task_id,
-                react_task_id=task.id or 0,
-                step_id=step_data.get("step_id", ""),
-                general_goal=general_goal,
-                specific_description=specific_description,
-                completion_criteria=completion_criteria,
-                status=step_data.get("status", "pending"),
-            )
-            self.db.add(step)
-            new_plan_context.append(
-                {
-                    "step_id": step.step_id,
-                    "general_goal": general_goal,
-                    "specific_description": specific_description,
-                    "completion_criteria": completion_criteria,
-                    "status": step.status,
-                    "recursion_history": [],
-                }
-            )
-
-        context.context["plan"] = new_plan_context
-
-    def _apply_step_status_updates(
-        self,
-        task: ReactTask,
-        context: ReactContext,
-        trace_id: str,
-        step_status_updates: list[dict[str, str]],
-    ) -> None:
-        """Persist plan-step status updates and mirror them into context.
-
-        Args:
-            task: Owning task.
-            context: Mutable context snapshot.
-            trace_id: Current recursion trace ID for logging.
-            step_status_updates: Validated step status updates.
-        """
-        plan_step_rows = self.db.exec(
-            select(ReactPlanStep).where(ReactPlanStep.task_id == task.task_id)
-        ).all()
-        plan_step_by_normalized_id = {
-            step.step_id.strip(): step
-            for step in plan_step_rows
-            if isinstance(step.step_id, str)
-        }
-
-        for update in step_status_updates:
-            step_id_to_update = update["step_id"]
-            status_to_update = update["status"]
-            plan_step = plan_step_by_normalized_id.get(step_id_to_update.strip())
-            if plan_step is None:
-                logger.warning(
-                    "Ignoring step_status_update for unknown step_id. "
-                    "trace_id=%s, task_id=%s, step_id=%s, status=%s, known_step_ids=%s",
-                    trace_id,
-                    task.task_id,
-                    step_id_to_update,
-                    status_to_update,
-                    sorted(plan_step_by_normalized_id.keys()),
-                )
-                continue
-
-            plan_step.status = status_to_update
-            plan_step.updated_at = datetime.now(UTC)
-            self.db.add(plan_step)
-
-            for plan_step_ctx in context.context.get("plan", []):
-                plan_step_ctx_id = plan_step_ctx.get("step_id")
-                if (
-                    isinstance(plan_step_ctx_id, str)
-                    and plan_step_ctx_id.strip() == step_id_to_update.strip()
-                ):
-                    plan_step_ctx["status"] = status_to_update
-                    break
-
-    def _link_recursion_to_context(
-        self,
-        context: ReactContext,
-        task: ReactTask,
-        recursion: ReactRecursion,
-        action_type: str,
-        action_output: dict[str, Any],
-        step_status_updates: list[dict[str, str]],
-        message: str,
-    ) -> None:
-        """Attach the current recursion to the correct branch in the context.
-
-        Args:
-            context: Mutable context snapshot.
-            task: Owning task.
-            recursion: Current recursion row.
-            action_type: Final action type.
-            action_output: Enriched action output payload.
-            step_status_updates: Validated step status updates.
             message: User-facing progress note.
         """
         current_rec_dict = {
@@ -638,20 +422,9 @@ class ReactStateService:
             "action": {
                 "action_type": action_type,
                 "output": action_output,
-                "step_status_update": step_status_updates,
             },
         }
-
-        added_to_plan = False
-        if recursion.plan_step_id:
-            for plan_step in context.context.get("plan", []):
-                if plan_step.get("step_id") == recursion.plan_step_id:
-                    plan_step["recursion_history"].append(current_rec_dict)
-                    added_to_plan = True
-                    break
-
-        if not added_to_plan:
-            context.recursion_history.append(current_rec_dict)
+        context.recursion_history.append(current_rec_dict)
 
     def _save_snapshot(
         self,

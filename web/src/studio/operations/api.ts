@@ -127,7 +127,7 @@ export interface OperationsTaskMessage {
   status: string;
   total_tokens: number;
   pending_user_action: unknown;
-  current_plan: unknown[];
+  current_steps: unknown[];
   recursions: OperationsRecursion[];
   created_at: string;
   updated_at: string;

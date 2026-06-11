@@ -374,19 +374,11 @@ class ChannelServiceTestCase(unittest.TestCase):
                 "timestamp": datetime.now(UTC).isoformat(),
                 "delta": "Reading the linked files",
                 "data": {
-                    "current_plan": [
+                    "current_steps": [
                         {
                             "step_id": "1",
-                            "general_goal": "Inspect the linked files",
-                            "specific_description": "",
-                            "completion_criteria": "",
+                            "title": "Inspect the linked files",
                             "status": "running",
-                            "recursion_history": [
-                                {
-                                    "iteration": 1,
-                                    "message": "Reading the linked files",
-                                }
-                            ],
                         }
                     ]
                 },
@@ -511,7 +503,7 @@ class ChannelServiceTestCase(unittest.TestCase):
                 "iteration": 1,
                 "timestamp": datetime.now(UTC).isoformat(),
                 "delta": "Drafting the first implementation plan",
-                "data": {"current_plan": []},
+                "data": {"current_steps": []},
             },
             {
                 "event_id": 2,
@@ -599,20 +591,17 @@ class ChannelServiceTestCase(unittest.TestCase):
             steps=[
                 ChannelPlanStepProgressView(
                     step_id="1",
-                    general_goal="Generate the Luckin Coffee design system",
+                    title="Generate the Luckin Coffee design system",
                     status="running",
-                    summaries=[
-                        "Search the coffee retail design references and gather palette guidance."
-                    ],
                 ),
                 ChannelPlanStepProgressView(
                     step_id="2",
-                    general_goal="Create the project folder and initialize the structure",
+                    title="Create the project folder and initialize the structure",
                     status="pending",
                 ),
                 ChannelPlanStepProgressView(
                     step_id="3",
-                    general_goal="Build the landing page HTML",
+                    title="Build the landing page HTML",
                     status="done",
                 ),
             ],
@@ -629,7 +618,6 @@ class ChannelServiceTestCase(unittest.TestCase):
                     "Using the design skill to prepare the design system",
                     "",
                     "[Running] Generate the Luckin Coffee design system",
-                    "Progress: Search the coffee retail design references and gather palette guidance.",
                     "",
                     "[Pending] Create the project folder and initialize the structure",
                     "",

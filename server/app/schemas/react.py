@@ -298,7 +298,7 @@ class ReactStreamEventType(str, Enum):
     COMPACT_FAILED = "compact_failed"
     TOOL_RESULT = "tool_result"
     PLAN_UPDATE = "plan_update"
-    REFLECT = "reflect"
+    PLAN_REVIEW = "plan_review"
     ANSWER = "answer"
     CLARIFY = "clarify"
     TASK_CANCELLED = "task_cancelled"
@@ -412,20 +412,6 @@ class ReactRecursionResponse(AppBaseModel):
     updated_at: datetime
 
 
-class ReactPlanStepResponse(AppBaseModel):
-    """Response schema for ReAct plan step information."""
-
-    id: int
-    task_id: str
-    step_id: str
-    general_goal: str
-    specific_description: str
-    completion_criteria: str
-    status: str
-    created_at: datetime
-    updated_at: datetime
-
-
 class ReactMidTaskInputRequest(AppBaseModel):
     """Request schema for injecting user input into a running task."""
 
@@ -459,3 +445,9 @@ class ReactMidTaskInputResponse(AppBaseModel):
 
     queue_id: str = Field(..., description="UUID of the enqueued queue item")
     status: str = Field(..., description="Status of the queue item")
+
+
+class EditPlanRequest(AppBaseModel):
+    """Request schema for user-edited plan Markdown content."""
+
+    plan_text: str = Field(..., description="Updated plan Markdown content")

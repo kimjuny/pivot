@@ -291,7 +291,7 @@ class ReactContextUsageService:
         payload = {
             "iteration": 1,
             "user_intent": draft_message,
-            "current_plan": [],
+            "current_steps": [],
         }
         messages.append(
             build_runtime_payload_message(

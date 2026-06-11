@@ -112,9 +112,8 @@ class ChannelPlanStepProgressView(AppBaseModel):
     """One logical plan step shown in a channel progress projection."""
 
     step_id: str
-    general_goal: str
+    title: str
     status: str
-    summaries: list[str] = Field(default_factory=list)
 
 
 class ChannelProgressView(AppBaseModel):

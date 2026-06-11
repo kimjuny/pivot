@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from app.models.react import ReactPlanStep, ReactRecursionState, ReactTask
+from app.models.react import ReactRecursionState, ReactTask
 from sqlmodel import Session, desc, select
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ class ReactContext:
             if snapshot_context is not None:
                 return snapshot_context
 
-        return cls._build_fallback_context(task, db)
+        return cls._build_fallback_context(task)
 
     @classmethod
     def _from_snapshot_payload(
@@ -126,40 +126,19 @@ class ReactContext:
         )
 
     @classmethod
-    def _build_fallback_context(cls, task: ReactTask, db: Session) -> ReactContext:
+    def _build_fallback_context(cls, task: ReactTask) -> ReactContext:
         """Build a minimal context when no valid snapshot exists.
 
         Args:
             task: Task whose fallback context should be built.
-            db: Database session used to load plan steps.
 
         Returns:
             A minimal but valid ReAct context.
         """
-        plan_steps_stmt = (
-            select(ReactPlanStep)
-            .where(ReactPlanStep.task_id == task.task_id)
-            .order_by(ReactPlanStep.step_id)
-        )
-        plan_steps = db.exec(plan_steps_stmt).all()
-
-        context_dict = cls._default_context_dict(task)
-        for step in plan_steps:
-            context_dict["plan"].append(
-                {
-                    "step_id": step.step_id,
-                    "general_goal": step.general_goal,
-                    "specific_description": step.specific_description,
-                    "completion_criteria": step.completion_criteria,
-                    "status": step.status,
-                    "recursion_history": [],
-                }
-            )
-
         return cls(
             global_state=cls._build_global_state(task),
             current_recursion=cls._build_current_recursion(task),
-            context=context_dict,
+            context=cls._default_context_dict(task),
             recursion_history=[],
         )
 
@@ -211,7 +190,6 @@ class ReactContext:
         return {
             "user_intent": task.user_intent,
             "constraints": [],
-            "plan": [],
         }
 
     @classmethod
@@ -237,10 +215,6 @@ class ReactContext:
         constraints = raw_context.get("constraints")
         if isinstance(constraints, list):
             normalized["constraints"] = constraints
-
-        plan = raw_context.get("plan")
-        if isinstance(plan, list):
-            normalized["plan"] = plan
 
         return normalized
 

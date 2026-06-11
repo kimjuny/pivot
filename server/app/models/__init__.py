@@ -35,7 +35,6 @@ from app.models.media_generation import (
 )
 from app.models.project import Project
 from app.models.react import (
-    ReactPlanStep,
     ReactRecursion,
     ReactRecursionState,
     ReactTask,
@@ -80,7 +79,6 @@ __all__ = [
     "PermissionRecord",
     "PrincipalType",
     "Project",
-    "ReactPlanStep",
     "ReactRecursion",
     "ReactRecursionState",
     "ReactTask",

@@ -938,7 +938,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "execution_mode": "live",
                     "timestamp": "2026-04-02T00:00:00Z",
                     "runtime": {"source": "live", "task_status": "running"},
-                    "event_payload": {"current_plan": ["collect facts"]},
+                    "event_payload": {"current_steps": ["collect facts"]},
                 },
             )
         )

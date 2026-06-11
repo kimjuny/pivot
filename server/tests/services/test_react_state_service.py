@@ -16,7 +16,6 @@ if str(SERVER_ROOT) not in sys.path:
 
 import_module("app.models.llm")
 Agent = import_module("app.models.agent").Agent
-ReactPlanStep = import_module("app.models.react").ReactPlanStep
 ReactRecursion = import_module("app.models.react").ReactRecursion
 ReactRecursionState = import_module("app.models.react").ReactRecursionState
 ReactTask = import_module("app.models.react").ReactTask
@@ -25,7 +24,7 @@ ReactStateService = import_module("app.services.react_state_service").ReactState
 
 
 class ReactStateServiceTestCase(unittest.TestCase):
-    """Validate recursion, plan, and snapshot persistence behavior."""
+    """Validate recursion and snapshot persistence behavior."""
 
     def setUp(self) -> None:
         """Create an isolated in-memory database per test."""
@@ -68,100 +67,8 @@ class ReactStateServiceTestCase(unittest.TestCase):
         """Close the session after each test."""
         self.session.close()
 
-    def test_finalize_success_replan_persists_plan_and_snapshot(self) -> None:
-        """PLAN should replace plan rows and write a snapshot."""
-        context = self.service.load_context(self.task)
-        context.update_for_new_recursion("trace-1")
-        recursion = self.service.start_recursion(
-            self.task,
-            "trace-1",
-            {"role": "user", "content": "{}"},
-        )
-
-        tokens = self.service.record_llm_decision(
-            task=self.task,
-            recursion=recursion,
-            thinking="provider thinking",
-            action_type="PLAN",
-            action_output={
-                "plan": [
-                    {
-                        "step_id": "1",
-                        "general_goal": "Goal",
-                        "specific_description": "Do work",
-                        "completion_criteria": "Done",
-                        "status": "pending",
-                    }
-                ]
-            },
-            action_step_id=None,
-            message="",
-            token_counter={
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-                "cached_input_tokens": 2,
-            },
-        )
-        self.session.refresh(recursion)
-        self.assertEqual(recursion.status, "running")
-        self.assertIsNotNone(recursion.input_message_json)
-
-        self.service.finalize_success(
-            task=self.task,
-            recursion=recursion,
-            context=context,
-            action_type="PLAN",
-            action_output={
-                "plan": [
-                    {
-                        "step_id": "1",
-                        "general_goal": "Goal",
-                        "specific_description": "Do work",
-                        "completion_criteria": "Done",
-                        "status": "pending",
-                    }
-                ]
-            },
-            step_status_updates=[],
-            message="",
-            tool_results=[],
-        )
-
-        self.session.refresh(self.task)
-        self.session.refresh(recursion)
-        plan_steps = self.session.exec(
-            select(ReactPlanStep).where(ReactPlanStep.task_id == self.task.task_id)
-        ).all()
-        snapshot = self.session.exec(
-            select(ReactRecursionState).where(
-                ReactRecursionState.trace_id == recursion.trace_id
-            )
-        ).one()
-        snapshot_payload = json.loads(snapshot.current_state)
-
-        self.assertEqual(tokens["total_tokens"], 15)  # type: ignore[index]
-        self.assertEqual(self.task.total_tokens, 15)
-        self.assertEqual(recursion.status, "done")
-        self.assertEqual(recursion.thinking, "provider thinking")
-        self.assertEqual(len(plan_steps), 1)
-        self.assertEqual(plan_steps[0].step_id, "1")
-        self.assertEqual(snapshot_payload["context"]["plan"][0]["step_id"], "1")
-
-    def test_finalize_success_call_tool_updates_step_and_snapshot(self) -> None:
-        """CALL_TOOL should persist step updates, memory, and enriched snapshot data."""
-        existing_step = ReactPlanStep(
-            task_id=self.task.task_id,
-            react_task_id=self.task.id or 0,
-            step_id="1",
-            general_goal="Goal",
-            specific_description="Do work",
-            completion_criteria="Done",
-            status="pending",
-        )
-        self.session.add(existing_step)
-        self.session.commit()
-
+    def test_finalize_success_call_tool_persists_snapshot(self) -> None:
+        """CALL_TOOL should persist tool results, memory, and enriched snapshot data."""
         context = self.service.load_context(self.task)
         context.update_for_new_recursion("trace-2")
         recursion = self.service.start_recursion(
@@ -185,7 +92,6 @@ class ReactStateServiceTestCase(unittest.TestCase):
             thinking=None,
             action_type="CALL_TOOL",
             action_output=action_output,
-            action_step_id="1",
             message="Working through the file analysis",
             token_counter={},
         )
@@ -200,7 +106,6 @@ class ReactStateServiceTestCase(unittest.TestCase):
             context=context,
             action_type="CALL_TOOL",
             action_output=action_output,
-            step_status_updates=[{"step_id": "1", "status": "done"}],
             message="Working through the file analysis",
             tool_results=[
                 {
@@ -214,20 +119,14 @@ class ReactStateServiceTestCase(unittest.TestCase):
         )
 
         self.session.refresh(recursion)
-        updated_step = self.session.exec(
-            select(ReactPlanStep).where(ReactPlanStep.task_id == self.task.task_id)
-        ).one()
         snapshot = self.session.exec(
             select(ReactRecursionState).where(
                 ReactRecursionState.trace_id == recursion.trace_id
             )
         ).one()
         snapshot_payload = json.loads(snapshot.current_state)
-        plan_entry = snapshot_payload["context"]["plan"][0]
-        rec_entry = plan_entry["recursion_history"][0]
+        rec_entry = snapshot_payload["recursion_history"][0]
 
-        self.assertEqual(updated_step.status, "done")
-        self.assertEqual(recursion.plan_step_id, "1")
         self.assertIsNotNone(recursion.tool_call_results)
         self.assertEqual(recursion.message, "Working through the file analysis")
         self.assertEqual(

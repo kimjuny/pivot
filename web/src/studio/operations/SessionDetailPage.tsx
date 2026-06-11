@@ -457,6 +457,9 @@ export default function SessionDetailPage() {
                       onEditSubmit={() => {}}
                       onApproveSkillChange={() => {}}
                       onRejectSkillChange={() => {}}
+                      onPlanApprove={() => {}}
+                      onPlanReject={() => {}}
+                      onPlanEdit={() => {}}
                     />
                   </div>
                 </div>

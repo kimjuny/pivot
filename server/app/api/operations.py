@@ -10,7 +10,6 @@ from app.models.agent_release import AgentRelease
 from app.models.react import ReactTask
 from app.models.user import User
 from app.schemas.session import (
-    CurrentPlanRecursionSummary,
     CurrentPlanStep,
     PendingUserActionPayload,
     RecursionDetail,
@@ -267,23 +266,14 @@ async def get_operations_session_detail(
                     if isinstance(task_data.get("pending_user_action"), dict)
                     else None
                 ),
-                current_plan=[
+                current_steps=[
                     CurrentPlanStep(
                         step_id=step["step_id"],
-                        general_goal=step["general_goal"],
-                        specific_description=step["specific_description"],
-                        completion_criteria=step["completion_criteria"],
+                        subject=step.get("subject", step.get("title", "")),
+                        description=step.get("description", ""),
                         status=step["status"],
-                        recursion_history=[
-                            CurrentPlanRecursionSummary(
-                                iteration=entry.get("iteration"),
-                                message=entry.get("message", ""),
-                            )
-                            for entry in step.get("recursion_history", [])
-                            if isinstance(entry, dict)
-                        ],
                     )
-                    for step in task_data.get("current_plan", [])
+                    for step in task_data.get("current_steps", [])
                     if isinstance(step, dict)
                 ],
                 recursions=recursions,

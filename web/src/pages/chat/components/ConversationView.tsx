@@ -27,6 +27,10 @@ interface ConversationViewProps {
     taskId: string,
     request: SkillChangeApprovalRequest,
   ) => void;
+  onPlanApprove: (taskId: string) => void;
+  onPlanReject: (taskId: string) => void;
+  onPlanEdit: (taskId: string, newText: string) => void;
+  planReviewSubmitting?: boolean;
 }
 
 /**
@@ -42,6 +46,10 @@ export const ConversationView = memo(function ConversationView({
   onEditSubmit,
   onApproveSkillChange,
   onRejectSkillChange,
+  onPlanApprove,
+  onPlanReject,
+  onPlanEdit,
+  planReviewSubmitting,
 }: ConversationViewProps) {
   const isConversationEmpty = messages.length === 0;
   const normalizedAgentName = agentName?.trim() || "ReAct Agent";
@@ -84,6 +92,10 @@ export const ConversationView = memo(function ConversationView({
               onReplyTask={onReplyTask}
               onApproveSkillChange={onApproveSkillChange}
               onRejectSkillChange={onRejectSkillChange}
+              onPlanApprove={onPlanApprove}
+              onPlanReject={onPlanReject}
+              onPlanEdit={onPlanEdit}
+              planReviewSubmitting={planReviewSubmitting}
             />
           )}
         </div>

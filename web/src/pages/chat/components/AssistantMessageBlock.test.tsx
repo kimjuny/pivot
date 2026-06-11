@@ -22,6 +22,9 @@ describe("AssistantMessageBlock", () => {
         onReplyTask={vi.fn()}
         onApproveSkillChange={vi.fn()}
         onRejectSkillChange={vi.fn()}
+        onPlanApprove={vi.fn()}
+        onPlanReject={vi.fn()}
+        onPlanEdit={vi.fn()}
       />,
     );
 
@@ -47,6 +50,9 @@ describe("AssistantMessageBlock", () => {
         onReplyTask={vi.fn()}
         onApproveSkillChange={vi.fn()}
         onRejectSkillChange={vi.fn()}
+        onPlanApprove={vi.fn()}
+        onPlanReject={vi.fn()}
+        onPlanEdit={vi.fn()}
       />,
     );
 
@@ -74,6 +80,9 @@ describe("AssistantMessageBlock", () => {
         onReplyTask={vi.fn()}
         onApproveSkillChange={vi.fn()}
         onRejectSkillChange={vi.fn()}
+        onPlanApprove={vi.fn()}
+        onPlanReject={vi.fn()}
+        onPlanEdit={vi.fn()}
       />,
     );
 
@@ -147,6 +156,9 @@ describe("AssistantMessageBlock", () => {
         onReplyTask={vi.fn()}
         onApproveSkillChange={onApproveSkillChange}
         onRejectSkillChange={onRejectSkillChange}
+        onPlanApprove={vi.fn()}
+        onPlanReject={vi.fn()}
+        onPlanEdit={vi.fn()}
       />,
     );
 
@@ -207,6 +219,9 @@ describe("AssistantMessageBlock", () => {
         onReplyTask={vi.fn()}
         onApproveSkillChange={vi.fn()}
         onRejectSkillChange={vi.fn()}
+        onPlanApprove={vi.fn()}
+        onPlanReject={vi.fn()}
+        onPlanEdit={vi.fn()}
       />,
     );
 

@@ -1,28 +1,23 @@
 """Parse and validate ReAct assistant responses.
 
-The parser validates JSON envelope output for all action types including
-CALL_TOOL (which accompanies native tool_calls).  The native ``tool_calls``
-field is handled separately by the engine, but the JSON envelope that
-rides alongside it is parsed here for its ``message`` and
-``step_status_update`` fields.
+The parser validates the JSON envelope output for the three remaining
+action types: CALL_TOOL, CLARIFY, and ANSWER.
 """
 
 import json
 from typing import Any
 
-from .types import ParsedAction, ParsedReactDecision, StepStatusUpdate
+from .types import ParsedAction, ParsedReactDecision
 
-ALLOWED_ACTION_TYPES = {"CALL_TOOL", "PLAN", "REFLECT", "CLARIFY", "ANSWER"}
+ALLOWED_ACTION_TYPES = {"CALL_TOOL", "CLARIFY", "ANSWER"}
 PARSE_RETRY_LIMIT = 1
 PARSE_RETRY_INSTRUCTION = (
     "Your previous response could not be parsed.\n"
     "Output the same decision again using the required format only.\n"
     "Rules:\n"
     "1) The first block must be a valid JSON object.\n"
-    "2) step_status_update is only allowed at action.step_status_update and must be a list.\n"
-    "3) Do not include markdown fences or any extra commentary."
+    "2) Do not include markdown fences or any extra commentary."
 )
-ALLOWED_STEP_STATUSES = {"pending", "running", "done", "error"}
 
 
 def safe_load_json(json_str: str) -> dict[str, Any]:
@@ -73,7 +68,6 @@ def parse_react_output(content: str) -> ParsedReactDecision:
         ValueError: If the response violates the ReAct protocol contract.
     """
     raw_payload = safe_load_json(content)
-    raw_payload = _normalize_step_status_update_location(raw_payload)
     action = _parse_action(raw_payload)
 
     message = _expect_optional_string(raw_payload.get("message"), "message")
@@ -90,38 +84,6 @@ def parse_react_output(content: str) -> ParsedReactDecision:
         action=action,
         raw_payload=resolved_payload,
     )
-
-
-def _normalize_step_status_update_location(payload: dict[str, Any]) -> dict[str, Any]:
-    """Move legacy step-status locations into ``action.step_status_update``.
-
-    The prompt contract asks the model to emit ``action.step_status_update``, but
-    models sometimes drift to the old top-level or ``action.output`` locations.
-    Treat that as recoverable structure drift instead of failing the recursion.
-    """
-    normalized_payload = dict(payload)
-    action_raw = normalized_payload.get("action")
-    if not isinstance(action_raw, dict):
-        return normalized_payload
-
-    normalized_action = dict(action_raw)
-    action_output = normalized_action.get("output")
-    normalized_output = dict(action_output) if isinstance(action_output, dict) else None
-
-    legacy_step_status_update = normalized_payload.pop("step_status_update", None)
-    output_step_status_update = None
-    if normalized_output is not None:
-        output_step_status_update = normalized_output.pop("step_status_update", None)
-        normalized_action["output"] = normalized_output
-
-    if "step_status_update" not in normalized_action:
-        if legacy_step_status_update is not None:
-            normalized_action["step_status_update"] = legacy_step_status_update
-        elif output_step_status_update is not None:
-            normalized_action["step_status_update"] = output_step_status_update
-
-    normalized_payload["action"] = normalized_action
-    return normalized_payload
 
 
 def _parse_action(payload: dict[str, Any]) -> ParsedAction:
@@ -154,16 +116,9 @@ def _parse_action(payload: dict[str, Any]) -> ParsedAction:
     if not isinstance(action_output, dict):
         raise ValueError("action.output must be an object.")
 
-    step_id = _parse_step_id(action_raw.get("step_id"))
-    step_status_update = _parse_step_status_updates(
-        action_raw.get("step_status_update")
-    )
-
     return ParsedAction(
         action_type=normalized_action_type,
         output=dict(action_output),
-        step_id=step_id,
-        step_status_update=step_status_update,
     )
 
 
@@ -174,55 +129,6 @@ def _expect_optional_bool(value: Any, field_name: str) -> bool | None:
     if isinstance(value, bool):
         return value
     raise ValueError(f"{field_name} must be a boolean when provided.")
-
-
-def _parse_step_id(raw_value: Any) -> str | None:
-    """Normalize an optional action step identifier."""
-    if raw_value is None:
-        return None
-    if not isinstance(raw_value, str):
-        raise ValueError("action.step_id must be a string when provided.")
-
-    normalized = raw_value.strip()
-    return normalized or None
-
-
-def _parse_step_status_updates(raw_value: Any) -> list[StepStatusUpdate]:
-    """Validate explicit plan-step status updates."""
-    if raw_value is None:
-        return []
-    if not isinstance(raw_value, list):
-        raise ValueError("action.step_status_update must be a list.")
-
-    updates: list[StepStatusUpdate] = []
-    for index, item in enumerate(raw_value):
-        if not isinstance(item, dict):
-            raise ValueError(f"action.step_status_update[{index}] must be an object.")
-
-        step_id = item.get("step_id")
-        if not isinstance(step_id, str) or not step_id.strip():
-            raise ValueError(
-                f"action.step_status_update[{index}].step_id must be a non-empty string."
-            )
-
-        status = item.get("status")
-        if (
-            not isinstance(status, str)
-            or status.strip().lower() not in ALLOWED_STEP_STATUSES
-        ):
-            raise ValueError(
-                f"action.step_status_update[{index}].status must be one of "
-                f"{sorted(ALLOWED_STEP_STATUSES)}."
-            )
-
-        updates.append(
-            StepStatusUpdate(
-                step_id=step_id.strip(),
-                status=status.strip().lower(),
-            )
-        )
-
-    return updates
 
 
 def _expect_optional_string(raw_value: Any, path: str) -> str:

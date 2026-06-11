@@ -1299,7 +1299,7 @@ describe("ChatContainer session rollover", () => {
           agent_answer: null,
           status: "running",
           total_tokens: 41205,
-          current_plan: [],
+          current_steps: [],
           recursions: [
             {
               iteration: 1,
@@ -1626,7 +1626,7 @@ describe("ChatContainer session rollover", () => {
               message: "Adds a reusable planning workflow.",
             },
           },
-          current_plan: [],
+          current_steps: [],
           recursions: [
             {
               iteration: 0,
@@ -1727,7 +1727,7 @@ describe("ChatContainer session rollover", () => {
           agent_answer: null,
           status: "waiting_input",
           total_tokens: 0,
-          current_plan: [],
+          current_steps: [],
           recursions: [
             {
               iteration: 0,
@@ -2409,7 +2409,7 @@ describe("ChatContainer session rollover", () => {
           agent_answer: null,
           status: "running",
           total_tokens: 0,
-          current_plan: [],
+          current_steps: [],
           recursions: [
             {
               iteration: 0,
@@ -2500,7 +2500,7 @@ describe("ChatContainer session rollover", () => {
           agent_answer: null,
           status: "running",
           total_tokens: 0,
-          current_plan: [],
+          current_steps: [],
           recursions: [
             {
               iteration: 0,
@@ -2542,7 +2542,7 @@ describe("ChatContainer session rollover", () => {
                   iteration: 0,
                   delta: "I have organized the launch plan.",
                   data: {
-                    current_plan: [],
+                    current_steps: [],
                     session_title: "Launch planning thread",
                   },
                   timestamp: "2026-03-16T13:24:46.000Z",

@@ -71,7 +71,7 @@ describe("OperationsHookReplayPanel", () => {
             status: "failed",
             total_tokens: 12,
             pending_user_action: null,
-            current_plan: [],
+            current_steps: [],
             recursions: [
               {
                 iteration: 2,

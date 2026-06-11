@@ -11,6 +11,7 @@ from app.models.react import ReactRecursion, ReactTask
 from app.models.session import Session as ConversationSession
 from app.models.user import User
 from app.schemas.react import (
+    EditPlanRequest,
     ReactChatRequest,
     ReactContextUsageRequest,
     ReactContextUsageResponse,
@@ -314,9 +315,7 @@ async def edit_react_task(
             detail="Task has no associated session",
         )
 
-    session = _get_owned_session(
-        db=db, session_id=task.session_id, user=current_user
-    )
+    session = _get_owned_session(db=db, session_id=task.session_id, user=current_user)
     agent = AgentService(db).get_required_agent(task.agent_id)
     session_type = session.type
     _require_runtime_permission(db=db, user=current_user, session_type=session_type)
@@ -959,3 +958,102 @@ async def get_task_state_at_iteration(
         return {"error": "State not found"}, 404
 
     return state
+
+
+# ---------------------------------------------------------------------------
+# Plan API — read and edit plan files for a task
+# ---------------------------------------------------------------------------
+
+
+@router.get("/react/tasks/{task_id}/plan")
+async def get_task_plan(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the plan Markdown content and structured steps for a task.
+
+    Reads from ``{workspace}/.pivot/plans/{task_id}.md`` and ``.json``.
+    """
+    from app.orchestration.react.plan_files import (
+        plan_exists,
+        read_plan_text,
+        read_steps,
+    )
+
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+    agent = AgentService(db).get_required_agent(task.agent_id)
+    session_type = "client"
+    if task.session_id is not None:
+        session = _get_owned_session(
+            db=db, session_id=task.session_id, user=current_user
+        )
+        session_type = session.type
+    _require_runtime_permission(db=db, user=current_user, session_type=session_type)
+    _require_agent_runtime_access(
+        db=db, user=current_user, agent=agent, session_type=session_type
+    )
+
+    workspace_path = _resolve_task_workspace_path(db, task)
+    if not workspace_path or not plan_exists(workspace_path, task_id):
+        return {"plan_text": None, "steps": []}
+
+    return {
+        "plan_text": read_plan_text(workspace_path, task_id),
+        "steps": read_steps(workspace_path, task_id),
+    }
+
+
+@router.put("/react/tasks/{task_id}/plan")
+async def edit_task_plan(
+    task_id: str,
+    body: EditPlanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Overwrite the plan Markdown content (user-edited plan from review panel).
+
+    Only writes the ``.md`` file; the structured ``.json`` steps remain
+    unchanged.  The agent re-reads the file on the next recursion.
+    """
+    from app.orchestration.react.plan_files import plan_exists, write_plan_text
+
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+    agent = AgentService(db).get_required_agent(task.agent_id)
+    session_type = "client"
+    if task.session_id is not None:
+        session = _get_owned_session(
+            db=db, session_id=task.session_id, user=current_user
+        )
+        session_type = session.type
+    _require_runtime_permission(db=db, user=current_user, session_type=session_type)
+    _require_agent_runtime_access(
+        db=db, user=current_user, agent=agent, session_type=session_type
+    )
+
+    workspace_path = _resolve_task_workspace_path(db, task)
+    if not workspace_path or not plan_exists(workspace_path, task_id):
+        return {"success": False, "error": "No plan found for this task"}
+
+    write_plan_text(workspace_path, task_id, body.plan_text)
+
+    return {"success": True}
+
+
+def _resolve_task_workspace_path(db, task: ReactTask) -> str | None:
+    """Resolve the backend workspace path for a task's session."""
+    from app.services.workspace_service import WorkspaceService
+
+    if not task.session_id:
+        return None
+    session = db.exec(
+        select(ConversationSession).where(
+            ConversationSession.session_id == task.session_id
+        )
+    ).first()
+    if not session or not session.workspace_id:
+        return None
+    workspace = WorkspaceService(db).get_workspace(session.workspace_id)
+    if not workspace:
+        return None
+    return WorkspaceService(db).get_workspace_backend_path(workspace)

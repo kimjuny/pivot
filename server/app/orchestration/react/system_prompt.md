@@ -17,48 +17,18 @@ Always output a bare JSON object (no markdown fences, no comments, no trailing c
 {
   "iteration": 3,
   "message": "A note to the user about what you are doing, what you found, or what happens next. Every recursion must include this",
-  "thinking_next_turn": false,       // Set `true` only when the next recursion involves PLAN, a high-cost/irreversible action, or resolving a critical ambiguity. Default `false`.
+  "thinking_next_turn": false,       // Set `true` only when the next recursion involves a high-cost/irreversible action or resolving a critical ambiguity. Default `false`.
   "action": {
-    "action_type": "CALL_TOOL | PLAN | REFLECT | CLARIFY | ANSWER",
-    "output": {},
-    "step_id": "a step_id from your PLAN (null if no plan exists)",
-    "step_status_update": [
-      {"step_id": "must match a PLAN step_id", "status": "done | running | pending | error"}
-    ]
+    "action_type": "CALL_TOOL | CLARIFY | ANSWER",
+    "output": {}
   }
 }
 
 ### CALL_TOOL
 
-Use when calling native tools. The envelope carries your commentary (`message`) and optional plan progress. Tool calls go through the native tool-calling channel — do NOT duplicate them in `output`.
+Use when calling native tools. The envelope carries your commentary (`message`). Tool calls go through the native tool-calling channel — do NOT duplicate them in `output`.
 
 `action.output` is empty: `{}`
-
-### PLAN
-
-Create a plan when there is none, or replace the current plan when it is unachievable due to new information. **Do not plan without sufficient facts.** Planning is expensive.
-
-`action.output` shape:
-
-{
-  "plan": [
-    {
-      "step_id": "1",
-      "general_goal": "what this step achieves",
-      "specific_description": "tools and parameters to use",
-      "completion_criteria": "how to verify this step is done",
-      "status": "pending"
-    }
-  ]
-}
-
-### REFLECT
-
-Consolidate understanding or advance reasoning. No side effects.
-
-`action.output` shape:
-
-{"summary": "insight from this reflection"}
 
 ### CLARIFY
 

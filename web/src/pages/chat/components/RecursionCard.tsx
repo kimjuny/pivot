@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   AlertCircle,
-  Brain,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -1125,7 +1124,7 @@ function DetailBlock({
 
 function hasExecutionDetails(recursion: RecursionRecord) {
   const nonToolEvents = recursion.events.filter(
-    (event) => event.type === "reflect" || event.type === "error",
+    (event) => event.type === "error",
   );
 
   return (
@@ -1143,7 +1142,7 @@ function ExecutionDetails({
   taskId?: string;
 }) {
   const nonToolEvents = recursion.events.filter(
-    (event) => event.type === "reflect" || event.type === "error",
+    (event) => event.type === "error",
   );
 
   if (!hasExecutionDetails(recursion)) {
@@ -1167,20 +1166,6 @@ function ExecutionDetails({
       )}
 
       {nonToolEvents.map((event, index) => {
-        if (event.type === "reflect") {
-          const reflectData = event.data as { summary?: string } | undefined;
-
-          return (
-            <DetailBlock
-              key={`reflect-${index}`}
-              icon={<Brain className="h-3.5 w-3.5 text-indigo-500" />}
-              label="Reflect"
-            >
-              {reflectData?.summary || "Reflecting on current state..."}
-            </DetailBlock>
-          );
-        }
-
         const errorData = event.data as { error?: string } | undefined;
 
         return (

@@ -80,7 +80,7 @@ describe("SessionDetailPage", () => {
           status: "failed",
           total_tokens: 22,
           pending_user_action: null,
-          current_plan: [],
+          current_steps: [],
           recursions: [
             {
               iteration: 3,

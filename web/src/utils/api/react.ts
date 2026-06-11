@@ -21,18 +21,11 @@ export interface RecursionDetail {
   updated_at: string;
 }
 
-export interface CurrentPlanRecursionSummary {
-  iteration?: number | null;
-  message: string;
-}
-
 export interface CurrentPlanStep {
   step_id: string;
-  general_goal: string;
-  specific_description: string;
-  completion_criteria: string;
+  subject: string;
+  description?: string;
   status: string;
-  recursion_history?: CurrentPlanRecursionSummary[];
 }
 
 export interface TaskMessage {
@@ -59,7 +52,7 @@ export interface TaskMessage {
       total_bytes?: number;
     } | null;
   } | null;
-  current_plan?: CurrentPlanStep[];
+  current_steps?: CurrentPlanStep[];
   recursions: RecursionDetail[];
   created_at: string;
   updated_at: string;
@@ -210,6 +203,25 @@ export const submitMidTaskInput = async (
     method: 'POST',
     body: JSON.stringify({ message }),
   }) as Promise<{ queue_id: string; status: string }>;
+};
+
+export const getTaskPlan = async (
+  taskId: string,
+): Promise<{ plan_text: string | null; steps: Array<{ step_id: string; subject: string; status: string }> }> => {
+  return apiRequest(`/react/tasks/${taskId}/plan`) as Promise<{
+    plan_text: string | null;
+    steps: Array<{ step_id: string; subject: string; status: string }>;
+  }>;
+};
+
+export const updatePlanText = async (
+  taskId: string,
+  planText: string,
+): Promise<{ success: boolean }> => {
+  return apiRequest(`/react/tasks/${taskId}/plan`, {
+    method: 'PUT',
+    body: JSON.stringify({ plan_text: planText }),
+  }) as Promise<{ success: boolean }>;
 };
 
 export const getReactContextUsage = async (payload: {

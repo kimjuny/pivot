@@ -1,5 +1,6 @@
 """Unit tests for snapshot-first ReAct context loading."""
 
+import json
 import sys
 import unittest
 from importlib import import_module
@@ -15,8 +16,8 @@ if str(SERVER_ROOT) not in sys.path:
 
 import_module("app.models.llm")
 Agent = import_module("app.models.agent").Agent
-ReactPlanStep = import_module("app.models.react").ReactPlanStep
 ReactTask = import_module("app.models.react").ReactTask
+ReactRecursionState = import_module("app.models.react").ReactRecursionState
 ReactContext = import_module("app.orchestration.react.context").ReactContext
 ReactStateService = import_module("app.services.react_state_service").ReactStateService
 
@@ -62,13 +63,11 @@ class ReactContextTestCase(unittest.TestCase):
             {"role": "user", "content": "{}"},
         )
         action_output = {
-            "plan": [
+            "tool_calls": [
                 {
-                    "step_id": "1",
-                    "general_goal": "Goal",
-                    "specific_description": "Do work",
-                    "completion_criteria": "Done",
-                    "status": "pending",
+                    "id": "call-1",
+                    "name": "read_file",
+                    "arguments": {"path": "/tmp/demo.txt"},
                 }
             ]
         }
@@ -76,9 +75,8 @@ class ReactContextTestCase(unittest.TestCase):
             task=self.task,
             recursion=recursion,
             thinking=None,
-            action_type="PLAN",
+            action_type="CALL_TOOL",
             action_output=action_output,
-            action_step_id=None,
             message="",
             token_counter={},
         )
@@ -86,11 +84,18 @@ class ReactContextTestCase(unittest.TestCase):
             task=self.task,
             recursion=recursion,
             context=context,
-            action_type="PLAN",
+            action_type="CALL_TOOL",
             action_output=action_output,
-            step_status_updates=[],
             message="",
-            tool_results=[],
+            tool_results=[
+                {
+                    "tool_call_id": "call-1",
+                    "name": "read_file",
+                    "arguments": {"path": "/tmp/demo.txt"},
+                    "result": "hello",
+                    "success": True,
+                }
+            ],
         )
 
         self.task.iteration = 3
@@ -104,28 +109,45 @@ class ReactContextTestCase(unittest.TestCase):
         self.assertEqual(loaded.global_state["iteration"], 3)
         self.assertEqual(loaded.global_state["status"], "waiting_input")
         self.assertEqual(loaded.current_recursion["iteration_index"], 3)
-        self.assertEqual(loaded.context["plan"][0]["step_id"], "1")
+        self.assertEqual(loaded.context["user_intent"], "hello")
 
-    def test_from_task_falls_back_to_plan_rows_without_snapshot(self) -> None:
-        """Tasks without snapshots should still expose persisted plan steps."""
-        step = ReactPlanStep(
+    def test_from_task_falls_back_to_minimal_context_without_snapshot(self) -> None:
+        """Tasks without snapshots should still expose a valid minimal context."""
+        loaded = ReactContext.from_task(self.task, self.session)
+
+        self.assertEqual(loaded.global_state["task_id"], self.task.task_id)
+        self.assertEqual(loaded.context["user_intent"], "hello")
+        self.assertEqual(loaded.context["constraints"], [])
+        self.assertEqual(loaded.recursion_history, [])
+
+    def test_from_task_preserves_constraints_from_snapshot(self) -> None:
+        """Snapshot constraints should survive context reconstruction."""
+        snapshot = ReactRecursionState(
+            trace_id="trace-snap",
             task_id=self.task.task_id,
-            react_task_id=self.task.id or 0,
-            step_id="1",
-            general_goal="Goal",
-            specific_description="Do work",
-            completion_criteria="Done",
-            status="running",
+            iteration_index=1,
+            current_state=json.dumps(
+                {
+                    "global": {"task_id": self.task.task_id},
+                    "current_recursion": {},
+                    "context": {
+                        "user_intent": "Build the feature",
+                        "constraints": ["No external APIs", "Must be fast"],
+                    },
+                    "recursion_history": [],
+                },
+                ensure_ascii=False,
+            ),
         )
-        self.session.add(step)
+        self.session.add(snapshot)
         self.session.commit()
 
         loaded = ReactContext.from_task(self.task, self.session)
 
-        self.assertEqual(loaded.global_state["task_id"], self.task.task_id)
-        self.assertEqual(loaded.context["plan"][0]["step_id"], "1")
-        self.assertEqual(loaded.context["plan"][0]["status"], "running")
-        self.assertEqual(loaded.recursion_history, [])
+        self.assertEqual(loaded.context["user_intent"], "Build the feature")
+        self.assertEqual(
+            loaded.context["constraints"], ["No external APIs", "Must be fast"]
+        )
 
 
 if __name__ == "__main__":
