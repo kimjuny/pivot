@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   Loader2,
   MoreHorizontal,
-  Pencil,
   Trash2,
   X,
   XCircle,
@@ -15,9 +14,7 @@ import { toast } from 'sonner';
 import {
   getAgents,
   deleteAgent,
-  updateAgent,
   createAgent,
-  updateAgentAccess,
   updateAgentClientState,
   AuthError,
   type AgentAccess,
@@ -114,8 +111,6 @@ function AgentList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
-  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'paused' | 'upgrading'>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -191,15 +186,6 @@ function AgentList() {
   // ---------------------------------------------------------------------------
 
   const handleCreateAgent = () => {
-    setModalMode('create');
-    setEditingAgent(null);
-    setIsModalOpen(true);
-  };
-
-  const handleEditAgent = (agent: Agent, e: MouseEvent) => {
-    e.stopPropagation();
-    setModalMode('edit');
-    setEditingAgent(agent);
     setIsModalOpen(true);
   };
 
@@ -254,45 +240,23 @@ function AgentList() {
     delegation_description?: string;
     access: AgentAccess;
   }) => {
-    if (modalMode === 'create') {
-      if (!agentData.llm_id) { toast.error('LLM selection is required'); return; }
-      const newAgent = await createAgent({
-        name: agentData.name,
-        description: agentData.description,
-        llm_id: agentData.llm_id,
-        session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
-        sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
-        compact_threshold_percent: agentData.compact_threshold_percent,
-        max_iteration: agentData.max_iteration,
-        allow_delegation: agentData.allow_delegation,
-        delegation_description: agentData.delegation_description,
-        use_scope: agentData.access.use_scope,
-        use_user_ids: agentData.access.use_scope === 'all' ? [] : agentData.access.use_user_ids,
-        use_group_ids: agentData.access.use_scope === 'all' ? [] : agentData.access.use_group_ids,
-      });
-      toast.success('Agent created');
-      navigate(`/studio/agents/${newAgent.id}`);
-    } else if (modalMode === 'edit' && editingAgent) {
-      await updateAgent(editingAgent.id, {
-        name: agentData.name,
-        description: agentData.description,
-        llm_id: agentData.llm_id,
-        session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
-        sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
-        compact_threshold_percent: agentData.compact_threshold_percent,
-        max_iteration: agentData.max_iteration,
-        allow_delegation: agentData.allow_delegation,
-        delegation_description: agentData.delegation_description,
-      });
-      await updateAgentAccess(editingAgent.id, {
-        ...agentData.access,
-        agent_id: editingAgent.id,
-        edit_user_ids: [],
-        edit_group_ids: [],
-      });
-      toast.success('Agent updated');
-      await loadAgents();
-    }
+    if (!agentData.llm_id) { toast.error('LLM selection is required'); return; }
+    const newAgent = await createAgent({
+      name: agentData.name,
+      description: agentData.description,
+      llm_id: agentData.llm_id,
+      session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
+      sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
+      compact_threshold_percent: agentData.compact_threshold_percent,
+      max_iteration: agentData.max_iteration,
+      allow_delegation: agentData.allow_delegation,
+      delegation_description: agentData.delegation_description,
+      use_scope: agentData.access.use_scope,
+      use_user_ids: agentData.access.use_scope === 'all' ? [] : agentData.access.use_user_ids,
+      use_group_ids: agentData.access.use_scope === 'all' ? [] : agentData.access.use_group_ids,
+    });
+    toast.success('Agent created');
+    navigate(`/studio/agents/${newAgent.id}`);
   };
 
   const handleAgentClick = (agent: Agent) => navigate(`/studio/agents/${agent.id}`);
@@ -520,10 +484,6 @@ function AgentList() {
                               : 'Open to clients'
                             : 'Managed by upgrade flow'}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={e => handleEditAgent(agent, e as unknown as MouseEvent)}>
-                          <Pencil className="w-4 h-4" aria-hidden="true" />
-                          Edit
-                        </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={e => handleDeleteAgent(agent, e as unknown as MouseEvent)}
                           className="text-destructive focus:text-destructive"
@@ -621,27 +581,9 @@ function AgentList() {
       {/* Modals */}
       <AgentModal
         isOpen={isModalOpen}
-        mode={modalMode}
-        agentId={editingAgent?.id}
-        creatorUserId={editingAgent?.created_by_user_id}
+        mode="create"
         onClose={() => setIsModalOpen(false)}
         onSave={handleModalSave}
-        initialData={
-          editingAgent
-            ? {
-                name: editingAgent.name,
-                description: editingAgent.description,
-                llm_id: editingAgent.llm_id,
-                session_idle_timeout_minutes:
-                  editingAgent.session_idle_timeout_minutes,
-                sandbox_timeout_seconds:
-                  editingAgent.sandbox_timeout_seconds,
-                compact_threshold_percent:
-                  editingAgent.compact_threshold_percent,
-                max_iteration: editingAgent.max_iteration,
-              }
-            : undefined
-        }
       />
 
       <ConfirmationModal

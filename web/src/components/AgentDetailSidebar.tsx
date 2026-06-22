@@ -436,6 +436,7 @@ interface AgentDetailSidebarProps {
     onChannelBindingsChanged?: () => void | Promise<void>;
     onMediaProviderBindingsChanged?: () => void | Promise<void>;
     onWebSearchBindingsChanged?: () => void | Promise<void>;
+    onDelegationBindingsChanged?: () => void | Promise<void>;
 }
 
 /**
@@ -454,6 +455,7 @@ function AgentDetailSidebar({
     onChannelBindingsChanged,
     onMediaProviderBindingsChanged,
     onWebSearchBindingsChanged,
+    onDelegationBindingsChanged,
 }: AgentDetailSidebarProps) {
     const { state, setOpen } = useSidebar();
     const [isToolsOpen, setIsToolsOpen] = useState(false);
@@ -2509,6 +2511,7 @@ function AgentDetailSidebar({
                                 callee_model_name: d.callee_model_name ?? null,
                             })));
                         }
+                        await onDelegationBindingsChanged?.();
                     }}
                 />
             )}

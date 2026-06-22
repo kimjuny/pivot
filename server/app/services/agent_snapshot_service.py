@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.agent import Agent
+from app.models.agent_delegation import AgentDelegation
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import AgentChannelBinding
 from app.models.extension import AgentExtensionBinding, ExtensionInstallation
@@ -154,6 +155,23 @@ class AgentSnapshotService:
             "runtime_config": runtime_config,
         }
 
+    def _normalize_delegation(self, delegation: AgentDelegation) -> dict[str, Any]:
+        """Build one canonical agent-delegation snapshot.
+
+        Each row is a directed edge: this agent (caller) can invoke
+        ``callee_agent_id`` as a subagent tool during its ReAct loop.
+        """
+        return {
+            "id": delegation.id,
+            "callee_agent_id": delegation.callee_agent_id,
+            "callee_alias": delegation.callee_alias,
+            "pass_mode": delegation.pass_mode,
+            "max_timeout_seconds": delegation.max_timeout_seconds,
+            "max_iterations_override": delegation.max_iterations_override,
+            "enabled": delegation.enabled,
+            "priority": delegation.priority,
+        }
+
     def build_current_snapshot(self, agent_id: int) -> dict[str, Any]:
         """Build the normalized current persisted snapshot for one agent.
 
@@ -181,6 +199,11 @@ class AgentSnapshotService:
             select(AgentMediaProviderBinding)
             .where(AgentMediaProviderBinding.agent_id == agent_id)
             .order_by(col(AgentMediaProviderBinding.id))
+        ).all()
+        delegations = self.db.exec(
+            select(AgentDelegation)
+            .where(AgentDelegation.caller_agent_id == agent_id)
+            .order_by(col(AgentDelegation.id))
         ).all()
 
         return {
@@ -211,6 +234,9 @@ class AgentSnapshotService:
             "extensions": ExtensionService(self.db).build_agent_extension_snapshot(
                 agent_id
             ),
+            "delegations": [
+                self._normalize_delegation(delegation) for delegation in delegations
+            ],
         }
 
     def build_studio_test_snapshot(
@@ -432,6 +458,12 @@ class AgentSnapshotService:
                     provider_keys, noun="Media providers", verb="configured"
                 )
             )
+        delegations = snapshot.get("delegations", [])
+        if delegations:
+            aliases = [d["callee_alias"] for d in delegations]
+            changes.append(
+                _format_name_list(aliases, noun="Subagents", verb="configured")
+            )
         return changes
 
     def _compare_named_collection(
@@ -566,6 +598,15 @@ class AgentSnapshotService:
                 key_field="manifest_hash",
                 label_field="name",
                 noun="Extensions",
+            )
+        )
+        changes.extend(
+            self._compare_named_collection(
+                before_snapshot.get("delegations", []),
+                after_snapshot.get("delegations", []),
+                key_field="id",
+                label_field="callee_alias",
+                noun="Subagents",
             )
         )
 

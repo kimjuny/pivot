@@ -650,6 +650,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
         onChannelBindingsChanged={handlePersistedBindingDraftChanged}
         onMediaProviderBindingsChanged={handlePersistedBindingDraftChanged}
         onWebSearchBindingsChanged={handlePersistedBindingDraftChanged}
+        onDelegationBindingsChanged={handlePersistedBindingDraftChanged}
       />
 
       <SidebarInset className="flex flex-col bg-background overflow-hidden">
