@@ -45,10 +45,10 @@ from app.services.react_state_service import ReactStateService
 from app.services.session_service import SessionService
 from app.services.task_attachment_service import TaskAttachmentService
 from fastapi.concurrency import run_in_threadpool
-from pydantic import TypeAdapter
 from sqlmodel import Session, desc, select
 
 from .context import ReactContext
+from .json_stream import EmitBuffer, StreamingFieldExtractor
 from .parser import (
     PARSE_RETRY_INSTRUCTION,
     PARSE_RETRY_LIMIT,
@@ -67,34 +67,25 @@ from .types import ParsedReactDecision, ToolCallRequest
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
-# Reusable adapter for partial JSON parsing of tool call arguments.
-_DICT_ADAPTER = TypeAdapter(dict)
-
-
-def try_partial_parse(accumulated_json: str) -> dict[str, Any] | None:
-    """Parse incomplete JSON using Pydantic ``allow_partial``.
-
-    Returns completed top-level key/value pairs, or ``None`` on failure.
-    """
-    try:
-        result = _DICT_ADAPTER.validate_json(
-            accumulated_json,
-            experimental_allow_partial=True,
-        )
-        return result if isinstance(result, dict) else None
-    except Exception:
-        return None
+# String field name we extract from a CALL_TOOL text envelope (the user-
+# visible "I'm reading file X" message).
+_ENVELOPE_MESSAGE_FIELDS: set[str] = {"message"}
 
 
 @dataclass(slots=True)
 class _StreamingToolCallState:
-    """Track accumulated argument state for one streaming tool call."""
+    """Track streaming state for one tool call.
+
+    The backend now forwards the raw accumulated ``arguments`` JSON to the
+    frontend verbatim (one ``tool_payload_delta`` per chunk, coalesced by
+    :class:`EmitBuffer`).  Field-level extraction of ``content`` /
+    ``diff`` / ``old_string`` / ``new_string`` lives entirely on the
+    frontend, so this state only needs to remember the call id/name and
+    whether the final ``tool_call`` event has been emitted.
+    """
 
     call_id: str
     name: str
-    accumulated_json: str = ""
-    last_parse_time: float = 0.0
-    last_parsed_result: dict[str, Any] = field(default_factory=dict)
     arguments_complete: bool = False
 
 
@@ -689,9 +680,22 @@ class ReactEngine:
         streaming_tool_states: dict[int, _StreamingToolCallState] = {}
         # Track finish_reason from streaming chunks (e.g. LENGTH = max_tokens hit).
         stream_finish_reason: FinishReason | None = None
+        # Live extractor for the ANSWER envelope's ``answer`` string field.
+        # Runs unconditionally: CALL_TOOL envelopes have no ``answer`` field,
+        # so the extractor emits nothing for them; ANSWER envelopes stream
+        # their answer text here as ``answer_delta`` events.
+        answer_extractor = StreamingFieldExtractor({"answer"})
 
-        partial_parse_interval = (
-            get_settings().REACT_TOOL_CALL_PARTIAL_PARSE_INTERVAL_MS / 1000
+        # Coalescing buffer for high-frequency streaming-content events
+        # (tool_payload_delta / answer_delta / reasoning).  Without this the
+        # extractor floods the SSE stream at ~132 events/sec (one per char),
+        # freezing the frontend.  See REACT_STREAMING_EMIT_INTERVAL_MS.
+        emit_buffer: EmitBuffer | None = (
+            EmitBuffer(
+                interval=get_settings().REACT_STREAMING_EMIT_INTERVAL_MS / 1000,
+            )
+            if token_meter_queue is not None
+            else None
         )
 
         # Keep empty until provider emits a real response id.
@@ -701,6 +705,8 @@ class ReactEngine:
         stream_started_at = perf_counter()
         last_report_at = stream_started_at
         last_report_tokens = 0
+        if emit_buffer is not None:
+            emit_buffer._last_flush = stream_started_at
         estimated_completion_tokens = 0
         usage_accumulator = StreamingUsageAccumulator()
 
@@ -719,6 +725,9 @@ class ReactEngine:
 
             usage_accumulator.observe(stream_chunk.usage)
 
+            # Timestamp for this chunk (emit-buffer windowing + token-rate).
+            now = perf_counter()
+
             # Track the finish reason (e.g. LENGTH when max_tokens is hit).
             for chunk_choice in stream_chunk.choices:
                 if chunk_choice.finish_reason is not None:
@@ -730,15 +739,22 @@ class ReactEngine:
                 if isinstance(reasoning_delta, str) and reasoning_delta:
                     reasoning_parts.append(reasoning_delta)
                     estimated_completion_tokens += estimate_text_tokens(reasoning_delta)
-                    if token_meter_queue is not None:
-                        await token_meter_queue.put(
-                            {"type": "reasoning", "delta": reasoning_delta}
-                        )
+                    if emit_buffer is not None and token_meter_queue is not None:
+                        for ev in emit_buffer.add_reasoning_delta(reasoning_delta, now):
+                            await token_meter_queue.put(ev)
 
                 content_delta = chunk_message.content
                 if isinstance(content_delta, str) and content_delta:
                     content_parts.append(content_delta)
                     estimated_completion_tokens += estimate_text_tokens(content_delta)
+                    # Stream-extract the ``answer`` field (if present) so the
+                    # frontend can render ANSWER text incrementally.
+                    if emit_buffer is not None and token_meter_queue is not None:
+                        for delta in answer_extractor.feed(content_delta):
+                            for ev in emit_buffer.add_answer_delta(
+                                delta.delta, delta.is_final, now
+                            ):
+                                await token_meter_queue.put(ev)
 
                 # Accumulate native tool_call fragments by position.
                 if chunk_message.tool_calls:
@@ -762,6 +778,7 @@ class ReactEngine:
                         if isinstance(tc_id, str) and tc_id:
                             acc["id"] = tc_id
                         func = tc.get("function")
+                        new_fragment = ""
                         if isinstance(func, dict):
                             name = func.get("name", "")
                             if isinstance(name, str) and name:
@@ -769,6 +786,13 @@ class ReactEngine:
                             args = func.get("arguments", "")
                             if isinstance(args, str) and args:
                                 acc["function"]["arguments"] += args
+                                new_fragment = args
+                                # Tool-call argument fragments are real LLM
+                                # output too; count them so pure-tool-call
+                                # iterations also report a meaningful tokens/s.
+                                estimated_completion_tokens += estimate_text_tokens(
+                                    args
+                                )
 
                         # --- Streaming tool-call tracking ---
                         call_id = acc["id"]
@@ -808,66 +832,66 @@ class ReactEngine:
                         if st.arguments_complete:
                             continue
 
-                        # Update accumulated JSON from the assembled arguments.
-                        st.accumulated_json = acc["function"]["arguments"]
-
-            # --- Periodic partial parse for tool_payload_delta ---
-            now = perf_counter()
-            if token_meter_queue is not None or eager_state is not None:
-                for _pos, st in streaming_tool_states.items():
-                    if st.arguments_complete or not st.accumulated_json:
-                        continue
-                    if now - st.last_parse_time < partial_parse_interval:
-                        continue
-                    st.last_parse_time = now
-
-                    parsed = try_partial_parse(st.accumulated_json)
-                    if parsed is None:
-                        continue
-
-                    # Diff: emit newly completed arguments.
-                    for key, value in parsed.items():
+                        # Forward the raw arguments fragment to the frontend
+                        # verbatim.  Field-level extraction of ``content`` /
+                        # ``diff`` / ``old_string`` / ``new_string`` (and the
+                        # +N line counter derived from them) lives entirely on
+                        # the frontend, so the backend stays a dumb pipe.
                         if (
-                            key not in st.last_parsed_result
+                            new_fragment
+                            and emit_buffer is not None
                             and token_meter_queue is not None
                         ):
-                            await token_meter_queue.put(
-                                {
-                                    "type": "tool_payload_delta",
-                                    "tool_call_id": st.call_id,
-                                    "tool_name": st.name,
-                                    "argument_name": key,
-                                    "payload_name": key,
-                                    "delta": json.dumps(value, ensure_ascii=False)
-                                    if not isinstance(value, str)
-                                    else value,
-                                    "is_final": True,
-                                }
-                            )
-                    st.last_parsed_result = dict(parsed)
+                            for ev in emit_buffer.add_tool_payload_delta(
+                                st.call_id,
+                                st.name,
+                                new_fragment,
+                                now,
+                            ):
+                                await token_meter_queue.put(ev)
 
-                    # Check if arguments are now complete JSON.
+            # --- Check whether any streaming tool call's args are now complete ---
+            if eager_state is not None or token_meter_queue is not None:
+                for _pos, st in streaming_tool_states.items():
+                    if st.arguments_complete:
+                        continue
+                    acc = tool_calls_by_pos.get(_pos)
+                    if acc is None:
+                        continue
+                    raw_args = acc["function"]["arguments"]
+                    if not raw_args:
+                        continue
                     try:
-                        final_args = json.loads(st.accumulated_json)
-                        if isinstance(final_args, dict):
-                            self._finalize_streaming_tool_call(
-                                st,
-                                final_args,
-                                token_meter_queue,
-                                eager_state,
-                            )
+                        final_args = json.loads(raw_args)
                     except json.JSONDecodeError:
-                        pass
+                        continue
+                    if isinstance(final_args, dict):
+                        tool_call_event = self._finalize_streaming_tool_call(
+                            st,
+                            final_args,
+                            eager_state,
+                        )
+                        if (
+                            tool_call_event is not None
+                            and token_meter_queue is not None
+                        ):
+                            await token_meter_queue.put(tool_call_event)
+
+            # Flush streaming-content buffer when the emit window elapses.
+            if emit_buffer is not None and token_meter_queue is not None:
+                for ev in emit_buffer.maybe_flush(now):
+                    await token_meter_queue.put(ev)
 
             # Token rate reporting.
             if token_meter_queue is not None and now - last_report_at >= 1.0:
                 window_seconds = max(now - last_report_at, 1e-6)
                 window_tokens = max(estimated_completion_tokens - last_report_tokens, 0)
+                reported_tokens = int(round(estimated_completion_tokens))
                 await token_meter_queue.put(
                     {
                         "type": "token_rate",
                         "tokens_per_second": round(window_tokens / window_seconds, 2),
-                        "estimated_completion_tokens": estimated_completion_tokens,
+                        "estimated_completion_tokens": reported_tokens,
                     }
                 )
                 last_report_at = now
@@ -877,14 +901,12 @@ class ReactEngine:
         for _pos, st in streaming_tool_states.items():
             if st.arguments_complete:
                 continue
-            if not st.accumulated_json:
+            acc = tool_calls_by_pos.get(_pos)
+            raw_args = acc["function"]["arguments"] if acc else ""
+            if not raw_args:
                 continue
             try:
-                final_args = json.loads(st.accumulated_json)
-                if isinstance(final_args, dict):
-                    self._finalize_streaming_tool_call(
-                        st, final_args, token_meter_queue, eager_state
-                    )
+                final_args = json.loads(raw_args)
             except json.JSONDecodeError:
                 logger.warning(
                     "Streaming tool call arguments are not valid JSON at stream end. "
@@ -892,6 +914,13 @@ class ReactEngine:
                     st.call_id,
                     st.name,
                 )
+                continue
+            if isinstance(final_args, dict):
+                tool_call_event = self._finalize_streaming_tool_call(
+                    st, final_args, eager_state
+                )
+                if tool_call_event is not None and token_meter_queue is not None:
+                    await token_meter_queue.put(tool_call_event)
 
         # Drain any completed eager results before returning.
         if eager_state is not None:
@@ -906,9 +935,23 @@ class ReactEngine:
                 {
                     "type": "token_rate",
                     "tokens_per_second": round(window_tokens / window_seconds, 2),
-                    "estimated_completion_tokens": estimated_completion_tokens,
+                    "estimated_completion_tokens": int(
+                        round(estimated_completion_tokens)
+                    ),
                 }
             )
+
+        # Flush any trailing answer-delta state (covers a stream cut off
+        # before the answer field's closing quote).
+        if emit_buffer is not None and token_meter_queue is not None:
+            for delta in answer_extractor.mark_complete():
+                for ev in emit_buffer.add_answer_delta(
+                    delta.delta, delta.is_final, perf_counter()
+                ):
+                    await token_meter_queue.put(ev)
+            # Final flush of every remaining streaming-content bucket.
+            for ev in emit_buffer.flush_all(now=perf_counter()):
+                await token_meter_queue.put(ev)
 
         attempt_usage_counter = usage_accumulator.build_token_counter()
 
@@ -919,10 +962,11 @@ class ReactEngine:
             and attempt_usage_counter["total_tokens"] == 0
         ):
             estimated_prompt_tokens = estimate_messages_tokens(messages)
+            completion_int = int(round(estimated_completion_tokens))
             attempt_usage_counter["prompt_tokens"] = estimated_prompt_tokens
-            attempt_usage_counter["completion_tokens"] = estimated_completion_tokens
+            attempt_usage_counter["completion_tokens"] = completion_int
             attempt_usage_counter["total_tokens"] = (
-                estimated_prompt_tokens + estimated_completion_tokens
+                estimated_prompt_tokens + completion_int
             )
         elif attempt_usage_counter["total_tokens"] <= 0 and (
             attempt_usage_counter["prompt_tokens"] > 0
@@ -1001,48 +1045,32 @@ class ReactEngine:
         self,
         st: _StreamingToolCallState,
         final_args: dict[str, Any],
-        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
         eager_state: _EagerToolExecutionState | None,
-    ) -> None:
-        """Mark one streaming tool call as complete and optionally start eager execution."""
+    ) -> dict[str, Any] | None:
+        """Mark one streaming tool call as complete and optionally start eager execution.
+
+        Returns the finalized ``tool_call`` event for the caller to push onto
+        the SSE queue (or ``None`` when no queue is in use).  The backend no
+        longer emits field-final ``tool_payload_delta`` events: the finalized
+        ``tool_call`` event carries the parsed ``arguments`` dict directly,
+        and the frontend extractor settles its own state when it sees the
+        ``arguments`` payload arrive.
+        """
         st.arguments_complete = True
 
-        # Emit remaining arguments not caught by partial parse.
-        for key, value in final_args.items():
-            if key not in st.last_parsed_result and token_meter_queue is not None:
-                delta = (
-                    json.dumps(value, ensure_ascii=False)
-                    if not isinstance(value, str)
-                    else value
-                )
-                token_meter_queue.put_nowait(
-                    {
-                        "type": "tool_payload_delta",
-                        "tool_call_id": st.call_id,
-                        "tool_name": st.name,
-                        "argument_name": key,
-                        "payload_name": key,
-                        "delta": delta,
-                        "is_final": True,
-                    }
-                )
-
-        # Emit finalized tool_call (no pending_arguments).
-        if token_meter_queue is not None:
-            token_meter_queue.put_nowait(
+        # Finalized tool_call event (no pending_arguments).
+        tool_call_event: dict[str, Any] = {
+            "type": "tool_call",
+            "tool_calls": [
                 {
-                    "type": "tool_call",
-                    "tool_calls": [
-                        {
-                            "id": st.call_id,
-                            "name": st.name,
-                            "arguments": final_args,
-                            "pending_arguments": False,
-                        }
-                    ],
-                    "tool_results": [],
+                    "id": st.call_id,
+                    "name": st.name,
+                    "arguments": final_args,
+                    "pending_arguments": False,
                 }
-            )
+            ],
+            "tool_results": [],
+        }
 
         # Start eager execution.
         if eager_state is not None and st.call_id not in eager_state.started_call_ids:
@@ -1054,6 +1082,8 @@ class ReactEngine:
                 self._execute_tool_call_request(tool_call)
             )
             eager_state.running_tasks[st.call_id] = execution_task
+
+        return tool_call_event
 
     async def _drain_eager_results(
         self,
@@ -2175,9 +2205,9 @@ class ReactEngine:
     def _extract_call_tool_message(content: str | None) -> str:
         """Extract the user-facing message from a CALL_TOOL text envelope.
 
-        The LLM may emit truncated JSON when text and tool_calls coexist in one
-        response, so we use partial parsing instead of ``parse_react_output``
-        which requires valid JSON.
+        The LLM may emit truncated JSON when text and tool_calls coexist in
+        one response, so we stream-extract the ``message`` field rather than
+        requiring valid JSON via ``parse_react_output``.
         """
         if not content or not content.strip():
             return ""
@@ -2186,14 +2216,10 @@ class ReactEngine:
         if not stripped.startswith("{"):
             return stripped
 
-        parsed = try_partial_parse(stripped)
-        if parsed is None:
-            return stripped
-
-        message = parsed.get("message")
-        if isinstance(message, str):
-            return message
-        return ""
+        extractor = StreamingFieldExtractor(_ENVELOPE_MESSAGE_FIELDS)
+        deltas = extractor.feed(stripped)
+        message = "".join(d.delta for d in deltas if d.field_name == "message")
+        return message or ""
 
     async def _execute_call_tool_recursion(
         self,
@@ -2868,10 +2894,7 @@ class ReactEngine:
                             "data": {
                                 "tool_call_id": meter_data.get("tool_call_id", ""),
                                 "tool_name": meter_data.get("tool_name", ""),
-                                "argument_name": meter_data.get("argument_name", ""),
-                                "payload_name": meter_data.get("payload_name", ""),
                                 "delta": meter_data.get("delta", ""),
-                                "is_final": meter_data.get("is_final", False),
                             },
                             "timestamp": datetime.now(UTC).isoformat(),
                         }

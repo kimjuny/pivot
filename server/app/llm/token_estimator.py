@@ -13,7 +13,7 @@ def _is_cjk(code_point: int) -> bool:
     )
 
 
-def estimate_text_tokens(text: str) -> int:
+def estimate_text_tokens(text: str) -> float:
     """Estimate token count from raw text.
 
     Why this exists:
@@ -21,14 +21,18 @@ def estimate_text_tokens(text: str) -> int:
     - We only need a stable rough estimate for real-time speed feedback.
     - This function is called frequently, so it avoids heavy tokenizers.
 
+    Returns a float so that small streaming fragments (e.g. a single char)
+    accumulate to a non-zero total rather than each rounding down to 0.
+    Callers that need an int should round the accumulated sum.
+
     Args:
         text: Raw text fragment.
 
     Returns:
-        Estimated token count (non-negative integer).
+        Estimated token count (non-negative float).
     """
     if not text:
-        return 0
+        return 0.0
 
     ascii_visible_chars = 0
     cjk_chars = 0
@@ -54,7 +58,7 @@ def estimate_text_tokens(text: str) -> int:
         + (other_unicode_chars * 0.9)
         + (whitespace_chars * 0.05)
     )
-    return max(int(round(estimated)), 0)
+    return max(estimated, 0.0)
 
 
 def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
@@ -89,4 +93,4 @@ def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
         # Add a tiny fixed overhead per message for role/format wrappers.
         total += 3
 
-    return total
+    return int(round(total))

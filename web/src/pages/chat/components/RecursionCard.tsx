@@ -20,6 +20,7 @@ import {
   getRecursionStatus,
 } from "../utils/chatSelectors";
 import { copyTextToClipboard } from "@/utils/clipboard";
+import { StreamingFieldExtractor } from "@/utils/streamingFieldExtractor";
 import { RecursionStateViewer } from "./RecursionStateViewer";
 import { ThinkingWordTicker } from "./ThinkingWordTicker";
 import { TokenUsageLabel } from "./TokenUsageLabel";
@@ -49,6 +50,18 @@ type LiveToolPayloadSnapshot = {
   arguments: Record<string, string>;
   finalArguments: Set<string>;
 };
+// String argument fields whose in-progress content we surface from the
+// raw arguments JSON stream so the UI can render the live filename and
+// +N line counter as the LLM writes.  ``path`` is included so the
+// basename appears alongside the growing counter before the finalized
+// ``tool_call`` event arrives.
+const STREAMED_TOOL_ARG_FIELDS = [
+  "path",
+  "content",
+  "diff",
+  "old_string",
+  "new_string",
+];
 type ToolExecutionSummaryPart = {
   key: string;
   content: string;
@@ -1226,40 +1239,47 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
   const resultById = new Map<string, ToolResultSnapshot>();
   const preparingById = new Map<string, boolean>();
   const livePayloadById = new Map<string, LiveToolPayloadSnapshot>();
+  // One streaming extractor per tool call, kept alive across raw-argument
+  // fragments so the +N counter can update as content streams in.  The
+  // backend now forwards raw arguments JSON verbatim; field-level
+  // extraction (content / diff / old_string / new_string) runs here.
+  const extractorById = new Map<string, StreamingFieldExtractor>();
   const orderedIds: string[] = [];
 
   for (const event of toolEvents) {
     if (event.type === "tool_payload_delta") {
       const data =
         event.data && typeof event.data === "object" && !Array.isArray(event.data)
-          ? (event.data as {
-              tool_call_id?: unknown;
-              argument_name?: unknown;
-              delta?: unknown;
-              is_final?: unknown;
-            })
+          ? (event.data as { tool_call_id?: unknown; delta?: unknown })
           : null;
       const toolCallId = data?.tool_call_id;
-      const argumentName = data?.argument_name;
       const delta = data?.delta;
       if (
         typeof toolCallId === "string" &&
         toolCallId.length > 0 &&
-        typeof argumentName === "string" &&
-        argumentName.length > 0 &&
-        typeof delta === "string"
+        typeof delta === "string" &&
+        delta.length > 0
       ) {
-        const livePayload = livePayloadById.get(toolCallId) ?? {
-          arguments: {},
-          finalArguments: new Set<string>(),
-        };
-        livePayload.arguments[argumentName] = `${
-          livePayload.arguments[argumentName] ?? ""
-        }${delta}`;
-        if (data?.is_final === true) {
-          livePayload.finalArguments.add(argumentName);
+        let livePayload = livePayloadById.get(toolCallId);
+        if (!livePayload) {
+          livePayload = { arguments: {}, finalArguments: new Set<string>() };
+          livePayloadById.set(toolCallId, livePayload);
         }
-        livePayloadById.set(toolCallId, livePayload);
+        let extractor = extractorById.get(toolCallId);
+        if (!extractor) {
+          extractor = new StreamingFieldExtractor(STREAMED_TOOL_ARG_FIELDS);
+          extractorById.set(toolCallId, extractor);
+        }
+        for (const fieldDelta of extractor.feed(delta)) {
+          if (fieldDelta.delta) {
+            livePayload.arguments[fieldDelta.fieldName] = `${
+              livePayload.arguments[fieldDelta.fieldName] ?? ""
+            }${fieldDelta.delta}`;
+          }
+          if (fieldDelta.isFinal) {
+            livePayload.finalArguments.add(fieldDelta.fieldName);
+          }
+        }
       }
       continue;
     }

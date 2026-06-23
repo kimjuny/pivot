@@ -245,18 +245,14 @@ describe("RecursionCard", () => {
                   {
                     id: "call-write",
                     name: "write_file",
-                    arguments: {
-                      path: { $payload_ref: "write_path" },
-                      content: { $payload_ref: "write_content" },
-                    },
+                    arguments: {},
+                    pending_arguments: true,
                   },
                   {
                     id: "call-edit",
                     name: "edit_file",
-                    arguments: {
-                      path: { $payload_ref: "edit_path" },
-                      diff: { $payload_ref: "edit_diff" },
-                    },
+                    arguments: {},
+                    pending_arguments: true,
                   },
                 ],
                 tool_results: [],
@@ -271,25 +267,10 @@ describe("RecursionCard", () => {
               data: {
                 tool_call_id: "call-write",
                 tool_name: "write_file",
-                argument_name: "path",
-                payload_name: "write_path",
-                delta: "web/src/pages/chat/index.tsx",
-                is_final: true,
-              },
-            },
-            {
-              type: "tool_payload_delta",
-              task_id: "task-live-tools",
-              trace_id: "trace-live-tools",
-              iteration: 0,
-              timestamp: "2026-03-24T00:00:02.200Z",
-              data: {
-                tool_call_id: "call-write",
-                tool_name: "write_file",
-                argument_name: "content",
-                payload_name: "write_content",
-                delta: "alpha\nbeta\ngamma",
-                is_final: false,
+                delta: JSON.stringify({
+                  path: "web/src/pages/chat/index.tsx",
+                  content: "alpha\nbeta\ngamma",
+                }),
               },
             },
             {
@@ -301,25 +282,10 @@ describe("RecursionCard", () => {
               data: {
                 tool_call_id: "call-edit",
                 tool_name: "edit_file",
-                argument_name: "path",
-                payload_name: "edit_path",
-                delta: "server/app/demo.py",
-                is_final: true,
-              },
-            },
-            {
-              type: "tool_payload_delta",
-              task_id: "task-live-tools",
-              trace_id: "trace-live-tools",
-              iteration: 0,
-              timestamp: "2026-03-24T00:00:02.400Z",
-              data: {
-                tool_call_id: "call-edit",
-                tool_name: "edit_file",
-                argument_name: "diff",
-                payload_name: "edit_diff",
-                delta: "@@ -1,2 +1,2 @@\n-old\n+new\n context",
-                is_final: false,
+                delta: JSON.stringify({
+                  path: "server/app/demo.py",
+                  diff: "@@ -1,2 +1,2 @@\n-old\n+new\n context",
+                }),
               },
             },
           ],
@@ -351,6 +317,118 @@ describe("RecursionCard", () => {
     expect(screen.getByText("+new")).toBeInTheDocument();
     expect(screen.getByText("-old")).toBeInTheDocument();
   });
+
+    it("updates the write_file line counter as content deltas stream in", () => {
+      // Regression: when tool_payload_delta arrives in many small chunks (the
+      // real streaming path), the "+N" counter must grow incrementally rather
+      // than staying frozen at the first value until the final delta lands.
+      // The backend forwards raw arguments JSON fragments; a TS extractor
+      // surfaces the in-progress `content` field for live +N rendering.
+      const basePath = "web/src/pages/chat/index.tsx";
+      // Mirrors how the LLM streams write_file: the content value grows
+      // INSIDE one arguments JSON whose content string only closes at the
+      // very end.  We assemble the final raw JSON, then stream growing
+      // prefixes of it as separate tool_payload_delta fragments -- exactly
+      // what the backend's coalesced fragments look like.
+      const finalContent = [
+        "alpha\n",
+        "beta\n",
+        "gamma\n",
+        "delta\n",
+        "epsilon\n",
+        "zeta\n",
+      ].join("");
+      const fullRaw = JSON.stringify({ path: basePath, content: finalContent });
+
+      // Compute prefix lengths that correspond to each cumulative line
+      // count.  Each prefix cuts the content value mid-stream (string still
+      // open) except the last, which closes it.
+      const contentOpen = fullRaw.indexOf('"content":"') + '"content":"'.length;
+      const contentValueEscaped = fullRaw.slice(
+        contentOpen,
+        fullRaw.lastIndexOf('"'),
+      );
+      const prefixForLines = (lines: number): number => {
+        // Walk the escaped content until we've seen `lines` newlines.
+        let seen = 0;
+        let i = 0;
+        while (i < contentValueEscaped.length && seen < lines) {
+          if (contentValueEscaped.slice(i, i + 2) === "\\n") {
+            seen += 1;
+            i += 2;
+          } else {
+            i += 1;
+          }
+        }
+        return contentOpen + i;
+      };
+      const checkpoints: Array<[number, number]> = [
+        [prefixForLines(1), 1],
+        [prefixForLines(3), 3],
+        [fullRaw.length, 6],
+      ];
+
+      const events: RecursionRecord["events"] = [
+        {
+          type: "tool_call",
+          task_id: "task-stream-counter",
+          trace_id: "trace-stream-counter",
+          iteration: 0,
+          timestamp: "2026-03-24T00:00:02.000Z",
+          data: {
+            tool_calls: [
+              {
+                id: "call-write-stream",
+                name: "write_file",
+                arguments: {},
+                pending_arguments: true,
+              },
+            ],
+            tool_results: [],
+          },
+        },
+      ];
+
+      const { rerender } = render(
+        <RecursionCard
+          messageId="message-stream-counter"
+          recursion={buildRecursion({ message: "Writing", events: [...events] })}
+          isExpanded={false}
+          onToggle={vi.fn()}
+        />,
+      );
+
+      let previousLen = 0;
+      for (const [rawLen, expectedLines] of checkpoints) {
+        events.push({
+          type: "tool_payload_delta",
+          task_id: "task-stream-counter",
+          trace_id: "trace-stream-counter",
+          iteration: 0,
+          timestamp: "2026-03-24T00:00:02.200Z",
+          data: {
+            tool_call_id: "call-write-stream",
+            tool_name: "write_file",
+            delta: fullRaw.slice(previousLen, rawLen),
+          },
+        });
+        previousLen = rawLen;
+
+        rerender(
+          <RecursionCard
+            messageId="message-stream-counter"
+            recursion={buildRecursion({ message: "Writing", events: [...events] })}
+            isExpanded={false}
+            onToggle={vi.fn()}
+          />,
+        );
+
+        const writeTool = screen.getByRole("button", {
+          name: /Running write_file/i,
+        });
+        expect(writeTool).toHaveTextContent(`+${expectedLines}`);
+      }
+    });
 
   it("labels truncated write_file previews with real source line numbers", async () => {
     const user = userEvent.setup();

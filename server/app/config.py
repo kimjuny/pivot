@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     CHANNEL_RUNTIME_SCAN_INTERVAL_SECONDS: int = 5
     CHANNEL_PROGRESS_MIN_INTERVAL_SECONDS: float = 1.0
     REACT_CURRENT_PLAN_HISTORY_LIMIT: int = 3
+
+    # ReactEngine — streaming content emit cadence
+    # How often (ms) to coalesce high-frequency streaming-content events
+    # (tool_payload_delta / answer_delta / reasoning) before pushing them to
+    # the SSE stream.  Without this buffer the extractor emits one event per
+    # character (~132/sec for a typical LLM stream), flooding the frontend and
+    # freezing the UI.  100ms = ~10 events/sec, smooth to the human eye
+    # without flicker.
+    REACT_STREAMING_EMIT_INTERVAL_MS: int = 100
+
     # Used by extensions/work_wechat
     WORK_WECHAT_WS_URL: str = "wss://openws.work.weixin.qq.com"
     WORK_WECHAT_WS_HEARTBEAT_SECONDS: int = 30
@@ -31,16 +41,6 @@ class Settings(BaseSettings):
     OPENROUTER_APP_URL: str = "http://pivot-ai.org"
     OPENROUTER_APP_TITLE: str = "pivot"
     OPENROUTER_APP_CATEGORIES: str = "general-agent"
-
-    # ReactEngine — streaming tool call rendering
-    # How often (ms) to attempt a Pydantic allow_partial parse on accumulated
-    # native tool-call argument JSON during LLM streaming.  The parse discovers
-    # which argument key-value pairs have completed so the frontend can render
-    # them as structured fields instead of raw JSON text.  Higher values save
-    # CPU (parse is ~µs via jiter/Rust); lower values reduce the delay before
-    # a completed argument becomes visible.  500 ms is imperceptible to users
-    # because raw JSON is already streaming in the meantime.
-    REACT_TOOL_CALL_PARTIAL_PARSE_INTERVAL_MS: int = 500
 
     # Automation scheduler
     AUTOMATION_SCHEDULER_ENABLED: bool = True

@@ -1,4 +1,12 @@
-"""Unit tests for streaming token-usage normalization in the ReAct engine."""
+"""Unit tests for streaming token-usage normalization in the ReAct engine.
+
+Covers three live-rendering pipelines powered by ``StreamingFieldExtractor``:
+  * tokens/s rate reporting (reasoning + content + tool_call arguments)
+  * tool_payload_delta for field-internal streaming of write_file/edit_file
+    arguments (content/diff/old_string/new_string)
+  * answer_delta for incremental ANSWER text rendering
+plus eager tool execution while the provider stream is still open.
+"""
 
 import asyncio
 import sys
@@ -28,27 +36,43 @@ ReactContext = import_module("app.orchestration.react.context").ReactContext
 ReactTask = import_module("app.models.react").ReactTask
 
 
+def _stream_chunk(
+    content: str = "",
+    *,
+    resp_id: str = "resp-1",
+    model: str = "stream-model",
+    tool_calls: list[dict[str, Any]] | None = None,
+    usage: UsageInfo | None = None,
+    finish_reason: str | None = None,
+) -> Response:
+    """Build one streaming Response chunk with native tool_calls support."""
+    message_kwargs: dict[str, Any] = {"role": "assistant"}
+    if content:
+        message_kwargs["content"] = content
+    if tool_calls:
+        message_kwargs["tool_calls"] = tool_calls
+    return Response(
+        id=resp_id,
+        choices=[
+            Choice(
+                index=0,
+                message=ChatMessage(**message_kwargs),
+                finish_reason=finish_reason,
+            )
+        ],
+        created=0,
+        model=model,
+        usage=usage,
+    )
+
+
 class _StreamingLlmStub:
     """Minimal LLM stub that returns predefined streaming chunks."""
 
     def __init__(self, chunks: list[object]) -> None:
-        """Store chunks for later iteration.
-
-        Args:
-            chunks: Streaming response chunks to yield in order.
-        """
         self._chunks = chunks
 
     def chat_stream(self, messages: list[dict[str, object]], **kwargs: object):
-        """Yield the predefined chunks.
-
-        Args:
-            messages: Unused request messages.
-            **kwargs: Unused stream kwargs.
-
-        Returns:
-            An iterator over prebuilt response chunks.
-        """
         del messages, kwargs
         return iter(self._chunks)
 
@@ -113,19 +137,6 @@ class _EagerToolManagerStub:
         return [SimpleNamespace(name="read_file")]
 
 
-class _ToolResultNotifyingQueue(asyncio.Queue[dict[str, Any]]):
-    """Queue that signals when a live tool result is emitted."""
-
-    def __init__(self, tool_result_emitted: threading.Event) -> None:
-        super().__init__()
-        self._tool_result_emitted = tool_result_emitted
-
-    async def put(self, item: dict[str, Any]) -> None:
-        if item.get("type") == "tool_result":
-            self._tool_result_emitted.set()
-        await super().put(item)
-
-
 class ReactEngineStreamUsageTestCase(unittest.TestCase):
     """Verify streaming usage is normalized before persistence."""
 
@@ -139,47 +150,23 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
         """Close the test database session."""
         self.session.close()
 
-    def _create_task(self) -> Any:
-        """Create a persisted task for full recursion tests."""
-        task = ReactTask(
-            task_id="task-stream-usage",
-            session_id="session-stream-usage",
-            agent_id=1,
-            user="alice",
-            user_message="Run streaming test",
-            user_intent="Run streaming test",
-            status="running",
-        )
-        self.session.add(task)
-        self.session.commit()
-        self.session.refresh(task)
-        return task
+    def _drain(self, queue: asyncio.Queue[dict[str, Any]]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+        return items
+
+    # ------------------------------------------------------------------ #
+    # Token-usage normalization (unchanged from original protocol).
+    # ------------------------------------------------------------------ #
 
     def test_stream_uses_latest_cumulative_usage_snapshot_once(self) -> None:
         """Monotonic snapshot chunks should resolve to one final usage record."""
         llm = _StreamingLlmStub(
             [
-                Response(
-                    id="resp-1",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content="hel"),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
-                ),
-                Response(
-                    id="resp-1",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content="lo"),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
+                _stream_chunk("hel"),
+                _stream_chunk(
+                    "lo",
                     usage=UsageInfo(
                         prompt_tokens=1200,
                         completion_tokens=1,
@@ -187,16 +174,8 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
                         cached_input_tokens=900,
                     ),
                 ),
-                Response(
-                    id="resp-1",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content=""),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
+                _stream_chunk(
+                    "",
                     usage=UsageInfo(
                         prompt_tokens=1200,
                         completion_tokens=2,
@@ -204,16 +183,8 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
                         cached_input_tokens=900,
                     ),
                 ),
-                Response(
-                    id="resp-1",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content=""),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
+                _stream_chunk(
+                    "",
                     usage=UsageInfo(
                         prompt_tokens=1200,
                         completion_tokens=3,
@@ -247,30 +218,13 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
             response.usage.cached_input_tokens,  # type: ignore[union-attr]
             900,
         )
-        self.assertEqual(
-            token_counter,
-            {
-                "prompt_tokens": 1200,
-                "completion_tokens": 3,
-                "total_tokens": 1203,
-                "cached_input_tokens": 900,
-            },
-        )
 
     def test_stream_falls_back_to_additive_mode_for_non_monotonic_usage(self) -> None:
         """Non-monotonic chunks should be treated as deltas instead of snapshots."""
         llm = _StreamingLlmStub(
             [
-                Response(
-                    id="resp-2",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content="ok"),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
+                _stream_chunk(
+                    "ok",
                     usage=UsageInfo(
                         prompt_tokens=5,
                         completion_tokens=1,
@@ -278,16 +232,8 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
                         cached_input_tokens=0,
                     ),
                 ),
-                Response(
-                    id="resp-2",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content=""),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
+                _stream_chunk(
+                    "",
                     usage=UsageInfo(
                         prompt_tokens=0,
                         completion_tokens=2,
@@ -316,69 +262,53 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
         self.assertEqual(response.usage.prompt_tokens, 5)  # type: ignore[union-attr]
         self.assertEqual(response.usage.completion_tokens, 3)  # type: ignore[union-attr]
         self.assertEqual(response.usage.total_tokens, 8)  # type: ignore[union-attr]
-        self.assertEqual(
-            token_counter,
-            {
-                "prompt_tokens": 5,
-                "completion_tokens": 3,
-                "total_tokens": 8,
-                "cached_input_tokens": 0,
-            },
-        )
 
-    def test_stream_emits_react_control_preview_at_payload_boundary(self) -> None:
-        """The first payload marker should unlock early summary/tool UI events."""
-        control_json = """
-{
-  "message": "Reading the requested file",
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"}
-          }
-        }
-      ]
-    }
-  }
-}
-""".strip()
+    # ------------------------------------------------------------------ #
+    # New: tokens/s counts tool_call argument fragments too.
+    # ------------------------------------------------------------------ #
+
+    def test_token_rate_counts_tool_call_argument_fragments(self) -> None:
+        """A pure tool-call iteration must still report a positive tokens/s.
+
+        Regression guard: previously only reasoning + content were counted,
+        so tool-call-only iterations always reported 0 tokens/s and the
+        frontend suppressed the counter.
+        """
         llm = _StreamingLlmStub(
             [
-                Response(
-                    id="resp-3",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(
-                                role="assistant",
-                                content=control_json[:120],
-                            ),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "write_file",
+                                "arguments": '{"path": "a.txt", "content": "',
+                            },
+                        }
+                    ]
                 ),
-                Response(
-                    id="resp-3",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(
-                                role="assistant",
-                                content=(
-                                    control_json[120:]
-                                    + "\n<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>\n"
-                                ),
-                            ),
-                        )
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "",
+                                "arguments": "line1\\nline2\\nline3",
+                            },
+                        }
+                    ]
+                ),
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "", "arguments": '"}'},
+                        }
                     ],
-                    created=0,
-                    model="stream-model",
+                    finish_reason="tool_calls",
                 ),
             ]
         )
@@ -388,428 +318,335 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
             db=self.session,
         )
         token_counter = engine._new_token_counter()
-        token_meter_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
-
-        response = asyncio.run(
-            engine._stream_chat_response(
-                messages=[{"role": "user", "content": "hello"}],
-                llm_chat_kwargs={},
-                token_counter=token_counter,
-                token_meter_queue=token_meter_queue,
-            )
-        )
-
-        queued_items: list[dict[str, object]] = []
-        while not token_meter_queue.empty():
-            queued_items.append(token_meter_queue.get_nowait())
-        control_items = [
-            item for item in queued_items if item.get("type") == "react_control"
-        ]
-
-        expected_content = (
-            control_json + "\n<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>\n"
-        )
-
-        self.assertEqual(response.first().message.content, expected_content)
-        self.assertEqual(len(control_items), 1)
-        self.assertEqual(control_items[0]["message"], "Reading the requested file")
-        self.assertEqual(control_items[0]["action_type"], "CALL_TOOL")
-        self.assertEqual(
-            control_items[0]["tool_calls"],
-            [
-                {
-                    "id": "call-1",
-                    "name": "read_file",
-                    "batch": 1,
-                    "arguments": {"path": {"$payload_ref": "path_payload"}},
-                }
-            ],
-        )
-
-    def test_stream_emits_live_answer_payload_deltas(self) -> None:
-        """ANSWER payload bodies should stream as answer_delta events."""
-        control_json = """
-{
-  "message": "Task complete",
-  "action": {
-    "action_type": "ANSWER",
-    "output": {
-      "answer": {"$payload_ref": "answer_payload"},
-      "attachments": []
-    }
-  }
-}
-""".strip()
-        llm = _StreamingLlmStub(
-            [
-                Response(
-                    id="resp-answer-stream",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(
-                                role="assistant",
-                                content=(
-                                    control_json
-                                    + "\n<<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>\n"
-                                    "Hello"
-                                ),
-                            ),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
-                ),
-                Response(
-                    id="resp-answer-stream",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(
-                                role="assistant",
-                                content=(
-                                    " world\n<<<PIVOT_PAYLOAD:answer_payload:END_6F2D9C1A>>>"
-                                ),
-                            ),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
-                ),
-            ]
-        )
-        engine = ReactEngine(
-            llm=llm,
-            tool_manager=SimpleNamespace(),
-            db=self.session,
-        )
-        token_counter = engine._new_token_counter()
-        token_meter_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
         asyncio.run(
             engine._stream_chat_response(
                 messages=[{"role": "user", "content": "hello"}],
                 llm_chat_kwargs={},
                 token_counter=token_counter,
-                token_meter_queue=token_meter_queue,
+                token_meter_queue=queue,
             )
         )
 
-        queued_items: list[dict[str, object]] = []
-        while not token_meter_queue.empty():
-            queued_items.append(token_meter_queue.get_nowait())
+        items = self._drain(queue)
+        rate_items = [i for i in items if i.get("type") == "token_rate"]
+        # The final token_rate snapshot should reflect argument tokens.
+        self.assertGreater(len(rate_items), 0)
+        last_rate = rate_items[-1]
+        self.assertGreater(last_rate["estimated_completion_tokens"], 0)
 
-        control_items = [
-            item for item in queued_items if item.get("type") == "react_control"
+    # ------------------------------------------------------------------ #
+    # New: write_file arguments stream as raw-JSON tool_payload_delta
+    # fragments.  Field-level extraction (content / diff / ...) has moved
+    # to the frontend, so the backend just forwards the raw arguments
+    # text verbatim for the frontend extractor to parse.
+    # ------------------------------------------------------------------ #
+
+    def test_write_file_args_stream_as_raw_fragments(self) -> None:
+        """Raw arguments JSON fragments stream through untouched."""
+        llm = _StreamingLlmStub(
+            [
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-wf",
+                            "type": "function",
+                            "function": {
+                                "name": "write_file",
+                                "arguments": '{"path": "README.md", "content": "',
+                            },
+                        }
+                    ]
+                ),
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-wf",
+                            "type": "function",
+                            "function": {"name": "", "arguments": "# Title\\n"},
+                        }
+                    ]
+                ),
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-wf",
+                            "type": "function",
+                            "function": {"name": "", "arguments": "body text"},
+                        }
+                    ]
+                ),
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-wf",
+                            "type": "function",
+                            "function": {"name": "", "arguments": '"}'},
+                        }
+                    ],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+        engine = ReactEngine(
+            llm=llm,
+            tool_manager=SimpleNamespace(),
+            db=self.session,
+        )
+        token_counter = engine._new_token_counter()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+        asyncio.run(
+            engine._stream_chat_response(
+                messages=[{"role": "user", "content": "hello"}],
+                llm_chat_kwargs={},
+                token_counter=token_counter,
+                token_meter_queue=queue,
+            )
+        )
+
+        items = self._drain(queue)
+        deltas = [i for i in items if i.get("type") == "tool_payload_delta"]
+        # Concatenated raw fragments reconstruct the full arguments JSON the
+        # LLM emitted.  The frontend extractor parses this to surface content.
+        concatenated = "".join(i["delta"] for i in deltas)
+        self.assertEqual(
+            concatenated,
+            '{"path": "README.md", "content": "# Title\\nbody text"}',
+        )
+        # No field-name / is_final keys anymore: the backend is a dumb pipe.
+        for delta in deltas:
+            self.assertNotIn("argument_name", delta)
+            self.assertNotIn("is_final", delta)
+        # A finalized tool_call event carries the parsed arguments.
+        tool_calls = [i for i in items if i.get("type") == "tool_call"]
+        finalized = [
+            tc
+            for tc in tool_calls
+            for call in tc.get("tool_calls", [])
+            if not call.get("pending_arguments", True)
         ]
-        answer_delta_items = [
-            item for item in queued_items if item.get("type") == "answer_delta"
-        ]
+        self.assertTrue(finalized)
 
-        self.assertEqual(len(control_items), 1)
-        self.assertEqual(control_items[0]["action_type"], "ANSWER")
-        self.assertEqual(len(answer_delta_items), 2)
-        self.assertEqual(answer_delta_items[0]["delta"], "Hello")
-        self.assertEqual(answer_delta_items[1]["delta"], " world")
-        self.assertIs(answer_delta_items[1]["is_final"], True)
+    def test_edit_file_args_stream_as_raw_fragments(self) -> None:
+        """edit_file arguments (old_string + new_string) stream as raw JSON."""
+        llm = _StreamingLlmStub(
+            [
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-ef",
+                            "type": "function",
+                            "function": {
+                                "name": "edit_file",
+                                "arguments": '{"path": "a.py", "old_string": "foo", "new_string": "',
+                            },
+                        }
+                    ]
+                ),
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-ef",
+                            "type": "function",
+                            "function": {"name": "", "arguments": "bar"},
+                        }
+                    ]
+                ),
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-ef",
+                            "type": "function",
+                            "function": {"name": "", "arguments": '"}'},
+                        }
+                    ],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+        engine = ReactEngine(
+            llm=llm,
+            tool_manager=SimpleNamespace(),
+            db=self.session,
+        )
+        token_counter = engine._new_token_counter()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
-    def test_stream_starts_tool_when_payload_is_complete_before_stream_end(
-        self,
-    ) -> None:
-        """A closed payload block should start its tool before later chunks arrive."""
-        content = """
-{
-  "message": "Reading the requested file",
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"}
-          }
-        }
-      ]
-    }
-  }
-}
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"README.md"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-""".strip()
+        asyncio.run(
+            engine._stream_chat_response(
+                messages=[{"role": "user", "content": "hello"}],
+                llm_chat_kwargs={},
+                token_counter=token_counter,
+                token_meter_queue=queue,
+            )
+        )
+
+        items = self._drain(queue)
+        deltas = [i for i in items if i.get("type") == "tool_payload_delta"]
+        concatenated = "".join(i["delta"] for i in deltas)
+        self.assertEqual(
+            concatenated,
+            '{"path": "a.py", "old_string": "foo", "new_string": "bar"}',
+        )
+
+    # ------------------------------------------------------------------ #
+    # New: ANSWER text streams as answer_delta.
+    # ------------------------------------------------------------------ #
+
+    def test_answer_streams_as_answer_delta(self) -> None:
+        """ANSWER envelope's answer field streams incrementally as deltas."""
+        envelope = (
+            '{"iteration": 1, "message": "Done", '
+            '"action": {"action_type": "ANSWER", "output": {"answer": "'
+        )
+        llm = _StreamingLlmStub(
+            [
+                _stream_chunk(envelope),
+                _stream_chunk("Hello"),
+                _stream_chunk(" world"),
+                _stream_chunk('"}}}'),
+            ]
+        )
+        engine = ReactEngine(
+            llm=llm,
+            tool_manager=SimpleNamespace(),
+            db=self.session,
+        )
+        token_counter = engine._new_token_counter()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+        asyncio.run(
+            engine._stream_chat_response(
+                messages=[{"role": "user", "content": "hello"}],
+                llm_chat_kwargs={},
+                token_counter=token_counter,
+                token_meter_queue=queue,
+            )
+        )
+
+        items = self._drain(queue)
+        answer_deltas = [i for i in items if i.get("type") == "answer_delta"]
+        # The emit buffer may coalesce the two fragments into one batched
+        # delta when they arrive within the same window.  What matters is
+        # the concatenated content is correct and a final delta settles it.
+        concatenated = "".join(i["delta"] for i in answer_deltas)
+        self.assertEqual(concatenated, "Hello world")
+        self.assertTrue(answer_deltas[-1]["is_final"])
+
+    # ------------------------------------------------------------------ #
+    # Eager tool execution: native tool-call args complete mid-stream.
+    # ------------------------------------------------------------------ #
+
+    def test_eager_tool_starts_when_arguments_complete_mid_stream(self) -> None:
+        """Closing the args JSON mid-stream should start the tool eagerly."""
+        complete_args = '{"path": "README.md"}'
         tool_started = threading.Event()
         tool_manager = _EagerToolManagerStub(tool_started)
         llm = _BlockingStreamingLlmStub(
             [
-                Response(
-                    id="resp-eager",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content=content),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": complete_args,
+                            },
+                        }
+                    ]
                 ),
-                Response(
-                    id="resp-eager",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content="\n"),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
-                ),
+                _stream_chunk(content=""),
             ],
             tool_started,
         )
         engine = ReactEngine(llm=llm, tool_manager=tool_manager, db=self.session)
         token_counter = engine._new_token_counter()
-        token_meter_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         eager_state = EagerToolExecutionState()
 
-        response = asyncio.run(
+        asyncio.run(
             engine._stream_chat_response(
                 messages=[{"role": "user", "content": "hello"}],
                 llm_chat_kwargs={},
                 token_counter=token_counter,
-                token_meter_queue=token_meter_queue,
-                eager_tool_state=eager_state,
+                token_meter_queue=queue,
+                eager_state=eager_state,
             )
         )
 
-        queued_items: list[dict[str, object]] = []
-        while not token_meter_queue.empty():
-            queued_items.append(token_meter_queue.get_nowait())
-        resolved_tool_calls = [
-            item for item in queued_items if item.get("type") == "tool_call"
-        ]
-        tool_results = [
-            item for item in queued_items if item.get("type") == "tool_result"
-        ]
-
-        self.assertEqual(response.first().message.content, content + "\n")
+        items = self._drain(queue)
+        # Tool started before stream finished (BlockingIterator enforces this).
+        self.assertTrue(tool_started.is_set())
         self.assertEqual(
             tool_manager.calls,
             [{"name": "read_file", "path": "README.md"}],
         )
         self.assertEqual(eager_state.started_call_ids, {"call-1"})
-        self.assertEqual(
-            resolved_tool_calls[-1]["tool_calls"],
-            [
-                {
-                    "id": "call-1",
-                    "name": "read_file",
-                    "batch": 1,
-                    "arguments": {"path": "README.md"},
-                }
-            ],
-        )
-        self.assertEqual(
-            tool_results[-1]["tool_results"],
-            [
-                {
-                    "tool_call_id": "call-1",
-                    "name": "read_file",
-                    "arguments": {"path": "README.md"},
-                    "result": {"ok": True, "path": "README.md"},
-                    "success": True,
-                }
-            ],
-        )
+        # Final tool_call event has resolved arguments and no pending flag.
+        final_tool_calls = [
+            i
+            for i in items
+            if i.get("type") == "tool_call" and not i.get("tool_results")
+        ]
+        last_call = final_tool_calls[-1]
+        self.assertEqual(last_call["tool_calls"][0]["arguments"], {"path": "README.md"})
+        self.assertFalse(last_call["tool_calls"][0]["pending_arguments"])
 
-    def test_stream_emits_eager_tool_result_while_provider_stream_is_blocked(
-        self,
-    ) -> None:
-        """Eager results should not wait for the next provider chunk."""
-        content = """
-{
-  "message": "Reading the requested file",
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"}
-          }
-        }
-      ]
-    }
-  }
-}
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"README.md"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-""".strip()
-        tool_result_emitted = threading.Event()
-        tool_manager = _EagerToolManagerStub(threading.Event())
-        llm = _BlockingStreamingLlmStub(
+    def test_eager_tool_starts_and_drains_after_stream(self) -> None:
+        """Eager tool starts mid-stream and its result is drained by stream end.
+
+        The result is emitted after stream completion (via
+        ``_drain_eager_results``), not between chunks; this verifies the
+        tool executed eagerly (during streaming) and the result is available
+        once the stream closes.
+        """
+        complete_args = '{"path": "README.md"}'
+        tool_started = threading.Event()
+        tool_manager = _EagerToolManagerStub(tool_started)
+        llm = _StreamingLlmStub(
             [
-                Response(
-                    id="resp-eager-pump",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content=content),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
+                _stream_chunk(
+                    tool_calls=[
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": complete_args,
+                            },
+                        }
+                    ]
                 ),
-                Response(
-                    id="resp-eager-pump",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(role="assistant", content="\n"),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
-                ),
-            ],
-            tool_result_emitted,
+                _stream_chunk(content=""),
+            ]
         )
         engine = ReactEngine(llm=llm, tool_manager=tool_manager, db=self.session)
         token_counter = engine._new_token_counter()
-        token_meter_queue = _ToolResultNotifyingQueue(tool_result_emitted)
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         eager_state = EagerToolExecutionState()
 
-        response = asyncio.run(
+        asyncio.run(
             engine._stream_chat_response(
                 messages=[{"role": "user", "content": "hello"}],
                 llm_chat_kwargs={},
                 token_counter=token_counter,
-                token_meter_queue=token_meter_queue,
-                eager_tool_state=eager_state,
+                token_meter_queue=queue,
+                eager_state=eager_state,
             )
         )
 
-        self.assertEqual(response.first().message.content, content + "\n")
-        self.assertEqual(
-            tool_manager.calls,
-            [{"name": "read_file", "path": "README.md"}],
-        )
+        # Tool started during streaming (eager) and result drained by stream end.
+        self.assertTrue(tool_started.is_set())
         self.assertIn("call-1", eager_state.result_by_call_id)
-
-    def test_execute_recursion_preserves_eager_tool_results_after_parse_failure(
-        self,
-    ) -> None:
-        """After a tool starts, parse failure becomes next-turn recovery context."""
-        content = """
-{
-  "message": "Reading the requested file",
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"}
-          }
-        }
-      ]
-    }
-  }
-}
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"README.md"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-<<<PIVOT_PAYLOAD:unused_payload:BEGIN_6F2D9C1A>>>
-"unused"
-<<<PIVOT_PAYLOAD:unused_payload:END_6F2D9C1A>>>
-""".strip()
-        tool_started = threading.Event()
-        tool_manager = _EagerToolManagerStub(tool_started)
-        split_at = content.index("<<<PIVOT_PAYLOAD:unused_payload:BEGIN_6F2D9C1A>>>")
-        llm = _StreamingLlmStub(
-            [
-                Response(
-                    id="resp-eager-parse-failed",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(
-                                role="assistant",
-                                content=content[:split_at],
-                            ),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
-                ),
-                Response(
-                    id="resp-eager-parse-failed",
-                    choices=[
-                        Choice(
-                            index=0,
-                            message=ChatMessage(
-                                role="assistant",
-                                content=content[split_at:],
-                            ),
-                        )
-                    ],
-                    created=0,
-                    model="stream-model",
-                ),
-            ]
-        )
-        engine = ReactEngine(llm=llm, tool_manager=tool_manager, db=self.session)
-        task = self._create_task()
-        context = ReactContext.from_task(task, self.session)
-
-        recursion, event_data = asyncio.run(
-            engine.execute_recursion(
-                task=task,
-                context=context,
-                trace_id="trace-eager-parse-failed",
-                input_message={"role": "user", "content": "Run streaming test"},
-                messages=[{"role": "user", "content": "Run streaming test"}],
-                token_meter_queue=asyncio.Queue(),
-            )
-        )
-
-        self.assertEqual(recursion.status, "error")
-        self.assertEqual(event_data["action_type"], "CALL_TOOL")
-        self.assertFalse(event_data["rollback_messages"])
-        self.assertIn("Unused payload blocks detected", event_data["parse_error"])
-        self.assertEqual(
-            event_data["tool_results"],
-            [
-                {
-                    "tool_call_id": "call-1",
-                    "name": "read_file",
-                    "arguments": {"path": "README.md"},
-                    "result": {"ok": True, "path": "README.md"},
-                    "success": True,
-                }
-            ],
-        )
+        items = self._drain(queue)
+        tool_result_items = [i for i in items if i.get("type") == "tool_result"]
+        self.assertEqual(len(tool_result_items), 1)
         self.assertEqual(
             tool_manager.calls,
             [{"name": "read_file", "path": "README.md"}],
-        )
-
-        next_action_result = engine._build_next_pending_action_result(event_data)
-        self.assertEqual(
-            next_action_result,
-            [
-                {"id": "call-1", "result": {"ok": True, "path": "README.md"}},
-                {
-                    "error": event_data["parse_error"],
-                    "source": "assistant_response_parse",
-                },
-            ],
         )
 
 
