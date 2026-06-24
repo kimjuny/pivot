@@ -1212,6 +1212,21 @@ function ExecutionDetails({
   );
 }
 
+type ToolStreamingState = {
+  // One streaming extractor per tool call, kept alive across renders so the
+  // char-level JSON state machine isn't reset on every event.  Without this,
+  // re-running the extractor over the whole event list each render can leave
+  // the state machine mid-field (e.g. inside ``content``) and produce wrong
+  // field boundaries, which is the root cause of the intermittent
+  // "filename / +N counter missing while content streams" race.
+  extractors: Map<string, StreamingFieldExtractor>;
+  // Accumulated in-progress field values per tool call, fed incrementally.
+  payloads: Map<string, LiveToolPayloadSnapshot>;
+  // Names seen on tool_payload_delta events, used to build placeholder cards
+  // before the first tool_call event arrives (the other half of the race).
+  namesByCallId: Map<string, string>;
+};
+
 function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
   const toolEvents = events
     .map((event, index) => ({ event, index }))
@@ -1231,6 +1246,75 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
     })
     .map(({ event }) => event);
 
+  const streamingRef = useRef<ToolStreamingState>({
+    extractors: new Map(),
+    payloads: new Map(),
+    namesByCallId: new Map(),
+  });
+  const streaming = streamingRef.current;
+
+  // Feed raw-argument fragments to the persistent per-call extractors.
+  // The events array is append-only for a given recursion, so a cursor over
+  // its index makes re-feeds idempotent: each render only processes the
+  // tool_payload_delta events that arrived since the last render.  This is
+  // what keeps the char-level extractor state machine stable across renders
+  // (re-feeding every delta every render can leave it mid-field and corrupt
+  // field boundaries -- the root cause of the intermittent
+  // "filename / +N counter missing while content streams" race).
+  const processedEventsRef = useRef(0);
+  // Detect array replacement (e.g. history replay rebuilding the recursion):
+  // when the new events are shorter, the cursor is stale and must reset.
+  if (events.length < processedEventsRef.current) {
+    streaming.extractors.clear();
+    streaming.payloads.clear();
+    streaming.namesByCallId.clear();
+    processedEventsRef.current = 0;
+  }
+  for (let i = processedEventsRef.current; i < events.length; i += 1) {
+    const event = events[i];
+    if (event.type !== "tool_payload_delta") {
+      continue;
+    }
+    const data =
+      event.data && typeof event.data === "object" && !Array.isArray(event.data)
+        ? (event.data as { tool_call_id?: unknown; tool_name?: unknown; delta?: unknown })
+        : null;
+    const toolCallId = data?.tool_call_id;
+    const delta = data?.delta;
+    if (
+      typeof toolCallId !== "string" ||
+      toolCallId.length === 0 ||
+      typeof delta !== "string" ||
+      delta.length === 0
+    ) {
+      continue;
+    }
+    if (typeof data?.tool_name === "string" && data.tool_name.length > 0) {
+      streaming.namesByCallId.set(toolCallId, data.tool_name);
+    }
+    let extractor = streaming.extractors.get(toolCallId);
+    if (!extractor) {
+      extractor = new StreamingFieldExtractor(STREAMED_TOOL_ARG_FIELDS);
+      streaming.extractors.set(toolCallId, extractor);
+    }
+    let livePayload = streaming.payloads.get(toolCallId);
+    if (!livePayload) {
+      livePayload = { arguments: {}, finalArguments: new Set<string>() };
+      streaming.payloads.set(toolCallId, livePayload);
+    }
+    for (const fieldDelta of extractor.feed(delta)) {
+      if (fieldDelta.delta) {
+        livePayload.arguments[fieldDelta.fieldName] = `${
+          livePayload.arguments[fieldDelta.fieldName] ?? ""
+        }${fieldDelta.delta}`;
+      }
+      if (fieldDelta.isFinal) {
+        livePayload.finalArguments.add(fieldDelta.fieldName);
+      }
+    }
+  }
+  processedEventsRef.current = events.length;
+
   if (toolEvents.length === 0) {
     return null;
   }
@@ -1238,49 +1322,10 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
   const callById = new Map<string, ToolCallSnapshot>();
   const resultById = new Map<string, ToolResultSnapshot>();
   const preparingById = new Map<string, boolean>();
-  const livePayloadById = new Map<string, LiveToolPayloadSnapshot>();
-  // One streaming extractor per tool call, kept alive across raw-argument
-  // fragments so the +N counter can update as content streams in.  The
-  // backend now forwards raw arguments JSON verbatim; field-level
-  // extraction (content / diff / old_string / new_string) runs here.
-  const extractorById = new Map<string, StreamingFieldExtractor>();
   const orderedIds: string[] = [];
 
   for (const event of toolEvents) {
     if (event.type === "tool_payload_delta") {
-      const data =
-        event.data && typeof event.data === "object" && !Array.isArray(event.data)
-          ? (event.data as { tool_call_id?: unknown; delta?: unknown })
-          : null;
-      const toolCallId = data?.tool_call_id;
-      const delta = data?.delta;
-      if (
-        typeof toolCallId === "string" &&
-        toolCallId.length > 0 &&
-        typeof delta === "string" &&
-        delta.length > 0
-      ) {
-        let livePayload = livePayloadById.get(toolCallId);
-        if (!livePayload) {
-          livePayload = { arguments: {}, finalArguments: new Set<string>() };
-          livePayloadById.set(toolCallId, livePayload);
-        }
-        let extractor = extractorById.get(toolCallId);
-        if (!extractor) {
-          extractor = new StreamingFieldExtractor(STREAMED_TOOL_ARG_FIELDS);
-          extractorById.set(toolCallId, extractor);
-        }
-        for (const fieldDelta of extractor.feed(delta)) {
-          if (fieldDelta.delta) {
-            livePayload.arguments[fieldDelta.fieldName] = `${
-              livePayload.arguments[fieldDelta.fieldName] ?? ""
-            }${fieldDelta.delta}`;
-          }
-          if (fieldDelta.isFinal) {
-            livePayload.finalArguments.add(fieldDelta.fieldName);
-          }
-        }
-      }
       continue;
     }
 
@@ -1318,6 +1363,33 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
     }
   }
 
+  // Placeholder cards for tool calls whose arguments are still streaming:
+  // tool_payload_delta can arrive before the first tool_call event, and a
+  // finalized tool_call may only land once the whole arguments JSON parses.
+  // Without this, the live payload (and the +N counter derived from it) has
+  // nothing to attach to, so both filename and counter vanish even while
+  // content streams into the expanded preview.
+  for (const [callId, payload] of streaming.payloads) {
+    if (callById.has(callId) || orderedIds.includes(callId)) {
+      continue;
+    }
+    // Only build a placeholder once we actually have streamed data (e.g. a
+    // path), so empty/partial pre-path deltas don't create phantom cards.
+    if (
+      Object.keys(payload.arguments).length === 0 &&
+      payload.finalArguments.size === 0
+    ) {
+      continue;
+    }
+    orderedIds.push(callId);
+    callById.set(callId, {
+      id: callId,
+      name: streaming.namesByCallId.get(callId) ?? "tool",
+      arguments: {},
+    });
+    preparingById.set(callId, true);
+  }
+
   const toolItems = orderedIds.flatMap<ToolExecutionItemSnapshot>((id) => {
     const call = callById.get(id);
     if (!call) {
@@ -1329,7 +1401,7 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
         call,
         result: resultById.get(id),
         isPreparing: preparingById.get(id) ?? false,
-        livePayload: livePayloadById.get(id),
+        livePayload: streaming.payloads.get(id),
       },
     ];
   });

@@ -955,6 +955,31 @@ class ReactEngine:
 
         return tool_call_event
 
+    @staticmethod
+    def _answer_delta_meter_to_sse(
+        meter_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Convert one queued ``answer_delta`` meter item into an SSE event.
+
+        ANSWER text is extracted character-by-character from the LLM content
+        stream and buffered in ``EmitBuffer``; the queue pump forwards each
+        flushed fragment here so the client can render the final answer
+        incrementally instead of waiting for the terminal ``answer`` event.
+        ``is_final=True`` marks the answer field's closing quote so the
+        frontend can settle the stream (the terminal ``answer`` event still
+        follows to reconcile the complete payload).  Returns ``None`` only
+        when the fragment carries no text and is not final, so an empty
+        coalesced tick produces no noise on the wire.
+        """
+        delta_text = meter_data.get("delta", "")
+        is_final = meter_data.get("is_final") is True
+        if not delta_text and not is_final:
+            return None
+        payload: dict[str, object] = {"delta": delta_text}
+        if is_final:
+            payload["is_final"] = True
+        return {"type": "answer_delta", "data": payload}
+
     async def _drain_eager_results(
         self,
         eager_state: _EagerToolExecutionState,
@@ -2769,6 +2794,16 @@ class ReactEngine:
                             },
                             "timestamp": datetime.now(UTC).isoformat(),
                         }
+                        continue
+
+                    if meter_type == "answer_delta":
+                        event = self._answer_delta_meter_to_sse(meter_data)
+                        if event is not None:
+                            event["task_id"] = task.task_id
+                            event["trace_id"] = trace_id
+                            event["iteration"] = task.iteration
+                            event["timestamp"] = datetime.now(UTC).isoformat()
+                            yield event
                         continue
 
                     raw_rate = meter_data.get("tokens_per_second")

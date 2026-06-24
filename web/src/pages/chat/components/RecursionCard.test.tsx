@@ -430,6 +430,65 @@ describe("RecursionCard", () => {
       }
     });
 
+    it("renders filename and +N counter when deltas arrive before tool_call", () => {
+      // Regression: the live +N counter (and the filename shown next to it)
+      // used to vanish intermittently while content streamed in. Root cause:
+      // tool_payload_delta can reach the frontend before the first tool_call
+      // event (the backend emits deltas as soon as args start streaming, and
+      // the finalized tool_call only lands once the whole args JSON parses).
+      // Before the fix, the card was keyed solely off tool_call events, so the
+      // streaming payload had nowhere to attach -- both filename and counter
+      // disappeared even though content was visibly flowing into the preview.
+      const content = "line1\nline2\nline3\n";
+      // Stream the full arguments JSON in two fragments, but send NO tool_call
+      // event at all -- simulating the window before it arrives.
+      const fullRaw = JSON.stringify({ path: "src/app.ts", content });
+      const events: RecursionRecord["events"] = [
+        {
+          type: "tool_payload_delta",
+          task_id: "task-delta-first",
+          trace_id: "trace-delta-first",
+          iteration: 0,
+          timestamp: "2026-03-24T00:00:02.000Z",
+          data: {
+            tool_call_id: "call-delta-first",
+            tool_name: "write_file",
+            delta: fullRaw.slice(0, Math.floor(fullRaw.length / 2)),
+          },
+        },
+        {
+          type: "tool_payload_delta",
+          task_id: "task-delta-first",
+          trace_id: "trace-delta-first",
+          iteration: 0,
+          timestamp: "2026-03-24T00:00:02.100Z",
+          data: {
+            tool_call_id: "call-delta-first",
+            tool_name: "write_file",
+            delta: fullRaw.slice(Math.floor(fullRaw.length / 2)),
+          },
+        },
+      ];
+
+      render(
+        <RecursionCard
+          messageId="message-delta-first"
+          recursion={buildRecursion({ message: "Writing", events: [...events] })}
+          isExpanded={false}
+          onToggle={vi.fn()}
+        />,
+      );
+
+      // The placeholder card built from the delta must show the tool name,
+      // the filename (basename of the streamed path), and the live +N counter.
+      const writeTool = screen.getByRole("button", {
+        name: /Preparing write_file|Running write_file/i,
+      });
+      expect(writeTool).toHaveTextContent("app.ts");
+      expect(writeTool).toHaveTextContent("+3");
+    });
+
+
   it("labels truncated write_file previews with real source line numbers", async () => {
     const user = userEvent.setup();
     const content = Array.from(

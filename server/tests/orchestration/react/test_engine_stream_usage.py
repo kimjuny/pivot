@@ -536,6 +536,34 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
         self.assertTrue(answer_deltas[-1]["is_final"])
 
     # ------------------------------------------------------------------ #
+    # Regression: the run_task yield pump must forward queued answer_delta
+    # items to the SSE stream.  Previously the pump had no answer_delta
+    # branch, so every fragment fell through to the token_rate fallback and
+    # ANSWER text only arrived as a single dump on recursion end.
+    # ------------------------------------------------------------------ #
+
+    def test_answer_delta_meter_to_sse_forwards_text(self) -> None:
+        """A text-bearing answer_delta meter item becomes an SSE event."""
+        event = ReactEngine._answer_delta_meter_to_sse(
+            {"delta": "Hello", "is_final": False}
+        )
+        self.assertIsNotNone(event)
+        assert event is not None  # for the type checker
+        self.assertEqual(event["type"], "answer_delta")
+        self.assertEqual(event["data"], {"delta": "Hello"})
+
+    def test_answer_delta_meter_to_sse_marks_final(self) -> None:
+        """The final fragment carries is_final=True so the frontend can settle."""
+        event = ReactEngine._answer_delta_meter_to_sse({"delta": "", "is_final": True})
+        self.assertEqual(event["data"], {"delta": "", "is_final": True})
+
+    def test_answer_delta_meter_to_sse_drops_empty_non_final(self) -> None:
+        """An empty coalesced tick with no final flag produces no wire noise."""
+        self.assertIsNone(
+            ReactEngine._answer_delta_meter_to_sse({"delta": "", "is_final": False})
+        )
+
+    # ------------------------------------------------------------------ #
     # Eager tool execution: native tool-call args complete mid-stream.
     # ------------------------------------------------------------------ #
 

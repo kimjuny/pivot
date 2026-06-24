@@ -15,6 +15,7 @@ import { TokenUsageChart } from "@/components/analytics/TokenUsageChart";
 import { UserActivityChart } from "@/components/analytics/UserActivityChart";
 import { UserGrowthChart } from "@/components/analytics/UserGrowthChart";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import {
   getStudioAgentPopularity,
   getStudioOverview,
@@ -167,7 +168,12 @@ function StudioDashboardPage() {
           </div>
         )}
 
-        {overview && (
+        {loading && overview === null ? (
+          <CenteredLoadingIndicator
+            label="Loading dashboard..."
+            className="min-h-[50vh]"
+          />
+        ) : overview ? (
         <>
           <div
             key={`kpi-${revealToken}`}
@@ -264,7 +270,7 @@ function StudioDashboardPage() {
             <UserGrowthChart data={userGrowth} />
           </div>
         </>
-      )}
+        ) : null}
       </div>
     </ScrollArea>
   );
