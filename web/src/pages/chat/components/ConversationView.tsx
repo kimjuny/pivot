@@ -10,9 +10,7 @@ import type { RewindScope } from "./UserMessageBubble";
 interface ConversationViewProps {
   messages: ChatMessage[];
   agentName?: string;
-  expandedRecursions: Record<string, boolean>;
   isStreaming: boolean;
-  onToggleRecursion: (messageId: string, recursionUid: string) => void;
   onReplyTask: (taskId: string | null) => void;
   onEditSubmit: (
     taskId: string,
@@ -39,9 +37,7 @@ interface ConversationViewProps {
 export const ConversationView = memo(function ConversationView({
   messages,
   agentName,
-  expandedRecursions,
   isStreaming,
-  onToggleRecursion,
   onReplyTask,
   onEditSubmit,
   onApproveSkillChange,
@@ -86,9 +82,7 @@ export const ConversationView = memo(function ConversationView({
           ) : (
             <AssistantMessageBlock
               message={item}
-              expandedRecursions={expandedRecursions}
               isStreaming={isStreaming}
-              onToggleRecursion={onToggleRecursion}
               onReplyTask={onReplyTask}
               onApproveSkillChange={onApproveSkillChange}
               onRejectSkillChange={onRejectSkillChange}

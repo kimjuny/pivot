@@ -116,9 +116,11 @@ export interface ReactContextUsageSummary {
   conversation_tokens: number;
   session_tokens: number;
   preview_tokens: number;
+  tools_tokens: number;
   bootstrap_tokens: number;
   draft_tokens: number;
   includes_task_bootstrap: boolean;
+  cache_hit_rate: number | null;
 }
 
 export interface ReactSessionRuntimeDebug {

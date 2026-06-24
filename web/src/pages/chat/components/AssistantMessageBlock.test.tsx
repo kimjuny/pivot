@@ -16,9 +16,7 @@ describe("AssistantMessageBlock", () => {
           status: "stopped",
           recursions: [],
         }}
-        expandedRecursions={{}}
         isStreaming={false}
-        onToggleRecursion={vi.fn()}
         onReplyTask={vi.fn()}
         onApproveSkillChange={vi.fn()}
         onRejectSkillChange={vi.fn()}
@@ -44,9 +42,7 @@ describe("AssistantMessageBlock", () => {
           status: "error",
           recursions: [],
         }}
-        expandedRecursions={{}}
         isStreaming={false}
-        onToggleRecursion={vi.fn()}
         onReplyTask={vi.fn()}
         onApproveSkillChange={vi.fn()}
         onRejectSkillChange={vi.fn()}
@@ -74,9 +70,7 @@ describe("AssistantMessageBlock", () => {
           status: "completed",
           recursions: [],
         }}
-        expandedRecursions={{}}
         isStreaming={false}
-        onToggleRecursion={vi.fn()}
         onReplyTask={vi.fn()}
         onApproveSkillChange={vi.fn()}
         onRejectSkillChange={vi.fn()}
@@ -150,9 +144,7 @@ describe("AssistantMessageBlock", () => {
             },
           ],
         }}
-        expandedRecursions={{}}
         isStreaming={false}
-        onToggleRecursion={vi.fn()}
         onReplyTask={vi.fn()}
         onApproveSkillChange={onApproveSkillChange}
         onRejectSkillChange={onRejectSkillChange}
@@ -213,9 +205,7 @@ describe("AssistantMessageBlock", () => {
             },
           ],
         }}
-        expandedRecursions={{}}
         isStreaming={false}
-        onToggleRecursion={vi.fn()}
         onReplyTask={vi.fn()}
         onApproveSkillChange={vi.fn()}
         onRejectSkillChange={vi.fn()}

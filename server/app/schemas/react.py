@@ -207,7 +207,7 @@ class ReactContextUsageResponse(AppBaseModel):
     )
     conversation_tokens: int = Field(
         ...,
-        description="Estimated tokens contributed by non-system messages",
+        description="Estimated tokens contributed by non-system, non-tool messages",
     )
     session_tokens: int = Field(
         ...,
@@ -216,6 +216,10 @@ class ReactContextUsageResponse(AppBaseModel):
     preview_tokens: int = Field(
         ...,
         description="Estimated tokens added by the current unsent preview over the persisted session state",
+    )
+    tools_tokens: int = Field(
+        ...,
+        description="Estimated tokens occupied by native tool/function definitions passed via the tools parameter",
     )
     bootstrap_tokens: int = Field(
         ...,
@@ -228,6 +232,10 @@ class ReactContextUsageResponse(AppBaseModel):
     includes_task_bootstrap: bool = Field(
         ...,
         description="Whether the estimate includes a once-per-task user_prompt bootstrap message",
+    )
+    cache_hit_rate: int | None = Field(
+        default=None,
+        description="Share of prompt tokens served from cache (0-100), null before the task records usage",
     )
 
 

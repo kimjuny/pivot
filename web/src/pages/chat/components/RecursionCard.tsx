@@ -1,29 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
-import {
-  AlertCircle,
-  Check,
-  CheckCircle2,
-  ChevronRight,
-  Copy,
-  Square,
-  XCircle,
-} from "lucide-react";
+import { Check, ChevronRight, Copy, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
-import { Spinner } from "@/components/ui/spinner";
-
 import type { RecursionRecord } from "../types";
-import {
-  calculateDuration,
-  formatTokenCount,
-  getRecursionStatus,
-} from "../utils/chatSelectors";
 import { copyTextToClipboard } from "@/utils/clipboard";
 import { StreamingFieldExtractor } from "@/utils/streamingFieldExtractor";
-import { RecursionStateViewer } from "./RecursionStateViewer";
-import { ThinkingWordTicker } from "./ThinkingWordTicker";
-import { TokenUsageLabel } from "./TokenUsageLabel";
 
 interface ToolExecutionSnapshot {
   toolCalls: Array<{
@@ -78,11 +60,7 @@ type ToolExecutionItemSnapshot = {
 };
 
 interface RecursionCardProps {
-  messageId: string;
   recursion: RecursionRecord;
-  taskId?: string;
-  isExpanded: boolean;
-  onToggle: (messageId: string, recursionUid: string) => void;
 }
 
 /**
@@ -1006,64 +984,6 @@ function ToolExecutionGroup({ items }: { items: ToolExecutionItemSnapshot[] }) {
   );
 }
 
-function StatusIcon({
-  status,
-  iconKey,
-  runningOffsetClassName = "top-px",
-}: {
-  status: ReturnType<typeof getRecursionStatus>;
-  iconKey: string;
-  runningOffsetClassName?: string;
-}) {
-  if (status === "running") {
-    return (
-      <Spinner
-        key={`${iconKey}-running`}
-        size={14}
-        className={`relative flex-shrink-0 ${runningOffsetClassName}`}
-      />
-    );
-  }
-  if (status === "completed") {
-    return (
-      <CheckCircle2
-        key={`${iconKey}-completed`}
-        className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"
-      />
-    );
-  }
-  if (status === "warning") {
-    return (
-      <AlertCircle
-        key={`${iconKey}-warning`}
-        className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-warning"
-      />
-    );
-  }
-  if (status === "error") {
-    return (
-      <XCircle
-        key={`${iconKey}-error`}
-        className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-danger"
-      />
-    );
-  }
-  return (
-    <Square
-      key={`${iconKey}-stopped`}
-      className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
-    />
-  );
-}
-
-function DetailBarIcon() {
-  return (
-    <span className="flex h-3.5 w-3.5 items-center justify-center">
-      <span className="h-3.5 w-1 rounded-full bg-muted-foreground" />
-    </span>
-  );
-}
-
 function ThinkingSection({ recursion }: { recursion: RecursionRecord }) {
   const [open, setOpen] = useState(recursion.status === "running");
   const isRunning = recursion.status === "running";
@@ -1113,72 +1033,18 @@ function ThinkingSection({ recursion }: { recursion: RecursionRecord }) {
   );
 }
 
-function DetailBlock({
-  icon,
-  label,
-  children,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5 rounded-md bg-background/60 p-2">
-      <div className="flex items-center gap-1.5">
-        {icon}
-        <span className="text-xs font-semibold text-foreground">{label}</span>
-      </div>
-      <div className="pl-5 text-xs leading-relaxed text-muted-foreground">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function hasExecutionDetails(recursion: RecursionRecord) {
-  const nonToolEvents = recursion.events.filter(
+function RecursionErrors({ recursion }: { recursion: RecursionRecord }) {
+  const errorEvents = recursion.events.filter(
     (event) => event.type === "error",
   );
 
-  return (
-    Boolean(recursion.action) ||
-    nonToolEvents.length > 0 ||
-    Boolean(recursion.errorLog)
-  );
-}
-
-function ExecutionDetails({
-  recursion,
-  taskId,
-}: {
-  recursion: RecursionRecord;
-  taskId?: string;
-}) {
-  const nonToolEvents = recursion.events.filter(
-    (event) => event.type === "error",
-  );
-
-  if (!hasExecutionDetails(recursion)) {
+  if (errorEvents.length === 0 && !recursion.errorLog) {
     return null;
   }
 
   return (
     <div className="space-y-1">
-      {recursion.action && (
-        <DetailBlock icon={<DetailBarIcon />} label="Action">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-primary">{recursion.action}</span>
-            {taskId && (
-              <RecursionStateViewer
-                taskId={taskId}
-                iteration={recursion.iteration}
-              />
-            )}
-          </div>
-        </DetailBlock>
-      )}
-
-      {nonToolEvents.map((event, index) => {
+      {errorEvents.map((event, index) => {
         const errorData = event.data as { error?: string } | undefined;
 
         return (
@@ -1211,6 +1077,25 @@ function ExecutionDetails({
     </div>
   );
 }
+
+/**
+ * Renders the agent's optional progress note as a lightweight aside line in
+ * the operation stream. Returns null when there is no message, so pure-tool
+ * iterations leave no fallback label behind (this is what retires the
+ * "CALL_TOOL" placeholder the previous shell-based layout leaked).
+ */
+function AsideRow({ text }: { text: string }) {
+  // Left padding aligns the text with Thinking rows and tool rows, which
+  // both reserve a hidden expand chevron (14px) + gap (8px) after the
+  // shared 12px container padding — so the message body starts at 34px,
+  // matching its siblings instead of drifting left.
+  return (
+    <p className="pl-[34px] pr-3 text-xs font-semibold leading-relaxed text-foreground">
+      {text}
+    </p>
+  );
+}
+
 
 type ToolStreamingState = {
   // One streaming extractor per tool call, kept alive across renders so the
@@ -1432,127 +1317,44 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
 }
 
 /**
- * Renders one recursion row and its expandable execution details.
+ * Renders one recursion as a shell-less step in a flat operation stream.
+ *
+ * The previous design wrapped every iteration in a titled card whose label
+ * fell back to the raw ``action`` enum (``CALL_TOOL`` / ``ANSWER`` / ...),
+ * which surfaced internal protocol values to users whenever the agent
+ * skipped its progress note. This version renders only the step's actual
+ * content — reasoning (thinking), an optional progress note (message),
+ * any errors, and the tool timeline — so pure-tool iterations show up as
+ * nothing but their tool rows, the way Claude Code / Codex present them.
  */
 export function RecursionCard({
-  messageId,
   recursion,
-  taskId,
-  isExpanded,
-  onToggle,
 }: RecursionCardProps) {
-  const key = `${messageId}-${recursion.uid}`;
-  const effectiveStatus = getRecursionStatus(recursion);
-  const hasStableRunningLabel = Boolean(
-    recursion.message || recursion.action,
-  );
-  const shouldShowPendingTicker =
-    effectiveStatus === "running" && !hasStableRunningLabel;
-  const stableRunningLabel =
-    recursion.message ||
-    recursion.action ||
-    "Working...";
-  const completedLabel =
-    recursion.message ||
-    recursion.action ||
-    "Completed step";
-  const canExpandDetails = hasExecutionDetails(recursion);
+  const hasThinking = Boolean(recursion.thinking);
+  const hasMessage = Boolean(recursion.message);
+  const hasErrors =
+    recursion.events.some((event) => event.type === "error") ||
+    Boolean(recursion.errorLog);
+
+  // Avoid emitting an empty container for the brief window between
+  // recursion_start and the first content event — keeps the stream clean.
+  if (!hasThinking && !hasMessage && !hasErrors) {
+    const hasToolEvents = recursion.events.some(
+      (event) =>
+        event.type === "tool_call" ||
+        event.type === "tool_payload_delta" ||
+        event.type === "tool_result",
+    );
+    if (!hasToolEvents) {
+      return null;
+    }
+  }
 
   return (
-    <div className="mb-2 space-y-1">
+    <div className="space-y-1.5">
       <ThinkingSection recursion={recursion} />
-
-      <button
-        onClick={() => {
-          if (canExpandDetails) {
-            onToggle(messageId, recursion.uid);
-          }
-        }}
-        className="group flex w-full items-start justify-between gap-3 rounded-md bg-muted/20 px-3 py-2 text-left transition-colors hover:bg-muted/30"
-        aria-expanded={canExpandDetails ? isExpanded : undefined}
-      >
-        <div className="flex min-w-0 flex-1 gap-2">
-          <div className="pt-0.5">
-            <StatusIcon
-              status={effectiveStatus}
-              iconKey={key}
-              runningOffsetClassName={
-                shouldShowPendingTicker ? "top-[4px]" : "top-px"
-              }
-            />
-          </div>
-          <div className="min-w-0 flex-1 space-y-1">
-            {effectiveStatus === "running" ? (
-              shouldShowPendingTicker ? (
-                <ThinkingWordTicker className="truncate text-xs font-semibold text-muted-foreground" />
-              ) : (
-                <div
-                  className="break-words text-xs font-semibold leading-relaxed text-foreground"
-                  title={stableRunningLabel}
-                >
-                  {stableRunningLabel}
-                </div>
-              )
-            ) : (
-              <div
-                className="break-words text-xs font-semibold leading-relaxed text-foreground"
-                title={completedLabel}
-              >
-                {completedLabel}
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-2.5 pt-0.5">
-          {recursion.endTime && (
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {calculateDuration(recursion.startTime, recursion.endTime)}s
-            </span>
-          )}
-          {recursion.status === "running" &&
-          typeof recursion.liveTokensPerSecond === "number" ? (
-            <span
-              className="inline-block w-24 whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground"
-              title={
-                typeof recursion.estimatedCompletionTokens === "number"
-                  ? `Estimated output: ${formatTokenCount(recursion.estimatedCompletionTokens)} tokens`
-                  : undefined
-              }
-            >
-              {recursion.liveTokensPerSecond.toFixed(1)} tokens/s
-            </span>
-          ) : (
-            recursion.tokens && (
-              <TokenUsageLabel
-                tokens={recursion.tokens}
-                label={`${formatTokenCount(recursion.tokens.total_tokens)} tokens`}
-              />
-            )
-          )}
-          {canExpandDetails && (
-            <ChevronRight
-              className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
-                isExpanded ? "rotate-90" : ""
-              }`}
-            />
-          )}
-        </div>
-      </button>
-
-      {canExpandDetails && (
-        <div
-          className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${
-            isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-          }`}
-        >
-          <div className="overflow-hidden">
-            <div className="px-1 pb-1 pt-1">
-              <ExecutionDetails recursion={recursion} taskId={taskId} />
-            </div>
-          </div>
-        </div>
-      )}
-
+      {hasMessage && <AsideRow text={recursion.message!} />}
+      <RecursionErrors recursion={recursion} />
       <ToolTimeline events={recursion.events} />
     </div>
   );

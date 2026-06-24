@@ -149,9 +149,11 @@ function buildContextUsage(sessionId: string | null = null) {
     conversation_tokens: 0,
     session_tokens: 0,
     preview_tokens: 0,
+    tools_tokens: 0,
     bootstrap_tokens: 0,
     draft_tokens: 0,
     includes_task_bootstrap: false,
+    cache_hit_rate: null,
   };
 }
 

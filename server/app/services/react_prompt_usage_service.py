@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.llm.token_estimator import estimate_messages_tokens
+from app.llm.token_estimator import estimate_messages_tokens, estimate_tools_tokens
 
 
 class ReactPromptUsageService:
@@ -41,9 +41,11 @@ class ReactPromptUsageService:
         exact_prompt_tokens: int | None = None,
         exact_prompt_message_count: int | None = None,
         preview_messages: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
         bootstrap_tokens: int = 0,
         draft_tokens: int = 0,
         includes_task_bootstrap: bool = False,
+        cache_hit_rate: int | None = None,
     ) -> dict[str, Any]:
         """Build one normalized context-usage payload."""
         runtime_tokens = ReactPromptUsageService.estimate_runtime_tokens(
@@ -53,7 +55,11 @@ class ReactPromptUsageService:
         )
         preview_message_list = preview_messages or []
         preview_tokens = estimate_messages_tokens(preview_message_list)
-        used_tokens = runtime_tokens + preview_tokens
+        # Tool/function definitions are passed to the provider via ``tools``
+        # (separate from messages) but still occupy context window; count them
+        # so used_tokens reflects the real prompt footprint.
+        tools_tokens = estimate_tools_tokens(tools or [])
+        used_tokens = runtime_tokens + preview_tokens + tools_tokens
         remaining_tokens = max(max_context_tokens - used_tokens, 0)
         used_percent = ReactPromptUsageService._to_percent(
             used_tokens,
@@ -76,12 +82,14 @@ class ReactPromptUsageService:
             "used_percent": used_percent,
             "remaining_percent": max(100 - used_percent, 0),
             "system_tokens": system_tokens,
-            "conversation_tokens": max(used_tokens - system_tokens, 0),
+            "conversation_tokens": max(used_tokens - system_tokens - tools_tokens, 0),
             "session_tokens": runtime_tokens,
             "preview_tokens": preview_tokens,
+            "tools_tokens": tools_tokens,
             "bootstrap_tokens": bootstrap_tokens,
             "draft_tokens": draft_tokens,
             "includes_task_bootstrap": includes_task_bootstrap,
+            "cache_hit_rate": cache_hit_rate,
         }
 
     @staticmethod

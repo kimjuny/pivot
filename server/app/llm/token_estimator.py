@@ -1,5 +1,6 @@
 """Lightweight token estimation utilities for high-frequency streaming metrics."""
 
+import json
 from typing import Any
 
 
@@ -64,6 +65,13 @@ def estimate_text_tokens(text: str) -> float:
 def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
     """Estimate prompt tokens from OpenAI-style chat messages.
 
+    Counts ``role``, ``content`` (string or block list), plus the structured
+    fields providers send alongside a message but the previous heuristic
+    ignored: ``tool_calls`` (assistant), ``tool_results`` / ``tool_call_id``
+    (tool-role messages), and ``reasoning_content`` (assistant reasoning).
+    Those fields are real prompt occupants, so omitting them left the
+    context-usage estimate systematically low.
+
     Args:
         messages: Chat messages containing ``role`` and ``content``.
 
@@ -90,7 +98,39 @@ def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
                 if isinstance(block_text, str):
                     total += estimate_text_tokens(block_text)
 
+        # Structured message occupants: assistant tool_calls, tool-role
+        # tool_results / tool_call_id, and assistant reasoning_content. These
+        # are billed by the provider but were previously invisible to the
+        # estimate. Serialize to JSON and reuse the text heuristic.
+        for field in ("tool_calls", "tool_results", "tool_call_id", "reasoning_content"):
+            value = message.get(field)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                total += estimate_text_tokens(value)
+            else:
+                total += estimate_text_tokens(json.dumps(value, ensure_ascii=False))
+
         # Add a tiny fixed overhead per message for role/format wrappers.
         total += 3
 
     return int(round(total))
+
+
+def estimate_tools_tokens(tools: list[dict[str, Any]]) -> int:
+    """Estimate tokens consumed by native tool/function definitions.
+
+    Tools are passed to the provider via the ``tools=[...]`` parameter,
+    separate from the messages list, but they still occupy prompt context.
+    Serialize the full definition list (name, description, JSON-Schema
+    parameters) and reuse the text heuristic.
+
+    Args:
+        tools: Tool definitions in OpenAI ``tools`` format.
+
+    Returns:
+        Estimated tokens occupied by the tool definitions.
+    """
+    if not tools:
+        return 0
+    return int(round(estimate_text_tokens(json.dumps(tools, ensure_ascii=False))))

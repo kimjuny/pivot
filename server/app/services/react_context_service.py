@@ -176,6 +176,15 @@ class ReactContextUsageService:
                 estimation_mode = "next_turn_preview"
 
         max_context_tokens = max(int(llm_config.max_context or 0), 0)
+        # Rebuild the request-scoped tool registry so the usage estimate sees
+        # the same tool/function definitions the LLM actually receives. This
+        # is the identical builder used at execution time, so the two cannot
+        # drift apart. See ExtensionService.build_request_tool_manager.
+        tool_definitions = self._resolve_tool_definitions(
+            runtime_config=runtime_config,
+            user_id=user_id,
+        )
+        cache_hit_rate = self._resolve_cache_hit_rate(task=task)
         return ReactContextUsageResponse(
             **ReactPromptUsageService.build_usage_summary(
                 task_id=task.task_id if task is not None else None,
@@ -186,11 +195,71 @@ class ReactContextUsageService:
                 exact_prompt_tokens=runtime_state.exact_prompt_tokens,
                 exact_prompt_message_count=runtime_state.exact_prompt_message_count,
                 preview_messages=preview_messages,
+                tools=tool_definitions,
                 bootstrap_tokens=bootstrap_tokens,
                 draft_tokens=draft_tokens,
                 includes_task_bootstrap=includes_task_bootstrap,
+                cache_hit_rate=cache_hit_rate,
             )
         )
+
+    def _resolve_tool_definitions(
+        self,
+        *,
+        runtime_config: AgentRuntimeConfig,
+        user_id: int,
+    ) -> list[dict[str, Any]]:
+        """Rebuild the OpenAI-format tool definitions for one runtime config.
+
+        Reuses ``ExtensionService.build_request_tool_manager`` — the same
+        builder the task supervisor uses — so the estimated tool set always
+        matches what the LLM receives. Returns ``[]`` when the registry
+        cannot be built (e.g. an empty agent) rather than raising, so a
+        usage estimate never blocks the composer.
+
+        Args:
+            runtime_config: Resolved agent runtime configuration.
+            user_id: Owner of the agent workspace required by the builder.
+
+        Returns:
+            Tool definitions in OpenAI ``tools`` format.
+        """
+        try:
+            tool_manager = ExtensionService(self.db).build_request_tool_manager(
+                user_id=user_id,
+                agent_id=runtime_config.agent_id,
+                raw_tool_ids=runtime_config.raw_tool_ids,
+                extension_bundle=runtime_config.extension_bundle,
+            )
+        except Exception:
+            # A usage estimate must never break the composer; fall back to
+            # counting no tool tokens when the registry cannot be rebuilt.
+            return []
+        return tool_manager.to_openai_tools()
+
+    @staticmethod
+    def _resolve_cache_hit_rate(task: ReactTask | None) -> int | None:
+        """Compute the cached-input hit rate for a task, when available.
+
+        The cache hit rate is the share of prompt tokens served from the
+        provider's prompt cache. It is only meaningful once the task has
+        recorded token usage (i.e. has run at least one recursion); before
+        that it stays ``None`` and the UI hides the row.
+
+        Args:
+            task: Optional active task whose aggregated usage to read.
+
+        Returns:
+            Integer percentage in [0, 100], or ``None`` when unavailable.
+        """
+        if task is None:
+            return None
+        prompt_tokens = task.total_prompt_tokens or 0
+        cached_tokens = task.total_cached_input_tokens or 0
+        if prompt_tokens <= 0:
+            return None
+        rate = round((cached_tokens / prompt_tokens) * 100)
+        return max(min(int(rate), 100), 0)
 
     @staticmethod
     def _normalize_file_ids(file_ids: list[str]) -> list[str]:

@@ -55,7 +55,6 @@ export default function SessionDetailPage() {
   const [sessionMeta, setSessionMeta] = useState<OperationsSessionDetail | null>(null);
   const [tasks, setTasks] = useState<OperationsTaskMessage[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [expandedRecursions, setExpandedRecursions] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hookFocusRequest, setHookFocusRequest] = useState<{
@@ -86,13 +85,6 @@ export default function SessionDetailPage() {
     void loadDetail();
   }, [loadDetail]);
 
-  /** Toggle recursion expansion for a given assistant message. */
-  const toggleRecursion = (_messageId: string, recursionUid: string) => {
-    setExpandedRecursions((prev) => ({
-      ...prev,
-      [recursionUid]: !prev[recursionUid],
-    }));
-  };
   const diagnosticsSummary = sessionMeta
     ? buildOperationsDetailDiagnostics(sessionMeta.diagnostics, tasks)
     : null;
@@ -450,9 +442,7 @@ export default function SessionDetailPage() {
                     <ConversationView
                       messages={messages}
                       agentName={sessionMeta.agent_name}
-                      expandedRecursions={expandedRecursions}
                       isStreaming={false}
-                      onToggleRecursion={toggleRecursion}
                       onReplyTask={() => {}}
                       onEditSubmit={() => {}}
                       onApproveSkillChange={() => {}}

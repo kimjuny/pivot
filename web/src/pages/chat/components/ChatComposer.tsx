@@ -89,6 +89,15 @@ interface ChatComposerProps {
   pendingFiles: PendingUploadItem[];
   canSendMessage?: boolean;
   isStreaming: boolean;
+  /**
+   * Live telemetry for the active task, surfaced in the composer while
+   * streaming: a running task timer and the current token generation rate.
+   */
+  liveTaskTelemetry?: {
+    taskStartTime?: string;
+    tokensPerSecond?: number;
+    estimatedCompletionTokens?: number;
+  } | null;
   isInputDisabled?: boolean;
   isConversationEmpty: boolean;
   hasUploadingFiles: boolean;
@@ -158,6 +167,34 @@ function getActiveMandatorySkillMention(
 }
 
 /**
+ * Tracks elapsed wall-clock seconds since a task started, ticking every
+ * second while running. Powers the live task timer in the composer footer.
+ */
+function useTaskElapsedSeconds(
+  startTime: string | undefined,
+  isRunning: boolean,
+): number {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!startTime || !isRunning) {
+      return;
+    }
+    const startMs = Date.parse(startTime);
+    if (!Number.isFinite(startMs)) {
+      return;
+    }
+    const tick = () =>
+      setElapsed(Math.max(0, Math.round((Date.now() - startMs) / 1000)));
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [startTime, isRunning]);
+
+  return elapsed;
+}
+
+/**
  * Owns the composer UI while receiving all state from the container to keep behavior explicit.
  */
 export function ChatComposer({
@@ -170,6 +207,7 @@ export function ChatComposer({
   pendingFiles,
   canSendMessage,
   isStreaming,
+  liveTaskTelemetry,
   isInputDisabled = false,
   isConversationEmpty,
   hasUploadingFiles,
@@ -202,6 +240,10 @@ export function ChatComposer({
   onDocumentInputChange,
   onRemovePendingFile,
 }: ChatComposerProps) {
+  const taskElapsedSeconds = useTaskElapsedSeconds(
+    liveTaskTelemetry?.taskStartTime,
+    isStreaming,
+  );
   const isCompactMode = selectedMandatorySkills.some(
     (skill) => skill.name === "compact",
   );
@@ -1059,6 +1101,27 @@ export function ChatComposer({
                   isLoading={isContextUsageLoading}
                   isCompacting={isCompacting}
                 />
+                {isStreaming && liveTaskTelemetry?.taskStartTime ? (
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                    {taskElapsedSeconds > 0 && (
+                      <span title="Task elapsed time">
+                        {taskElapsedSeconds}s
+                      </span>
+                    )}
+                    {typeof liveTaskTelemetry.tokensPerSecond === "number" && (
+                      <span
+                        title={
+                          typeof liveTaskTelemetry.estimatedCompletionTokens ===
+                          "number"
+                            ? `Estimated output: ${liveTaskTelemetry.estimatedCompletionTokens.toLocaleString()} tokens`
+                            : undefined
+                        }
+                      >
+                        {liveTaskTelemetry.tokensPerSecond.toFixed(1)} tok/s
+                      </span>
+                    )}
+                  </span>
+                ) : null}
                 {isStreaming && !draftMessage.trim() ? (
                   <InputGroupButton
                     type="button"

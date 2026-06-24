@@ -21,6 +21,7 @@ import { formatTimestamp } from "@/utils/timestamp";
 
 import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
 import {
+  calculateDuration,
   extractSkillChangeApprovalRequest,
   formatTokenCount,
   isClarifyMessage,
@@ -32,9 +33,7 @@ import { TokenUsageLabel } from "./TokenUsageLabel";
 
 interface AssistantMessageBlockProps {
   message: ChatMessage;
-  expandedRecursions: Record<string, boolean>;
   isStreaming: boolean;
-  onToggleRecursion: (messageId: string, recursionUid: string) => void;
   onReplyTask: (taskId: string | null) => void;
   onApproveSkillChange: (
     taskId: string,
@@ -81,9 +80,7 @@ function findPlanRecursionSplitIndex(
  */
 export const AssistantMessageBlock = memo(function AssistantMessageBlock({
   message,
-  expandedRecursions,
   isStreaming,
-  onToggleRecursion,
   onReplyTask,
   onApproveSkillChange,
   onRejectSkillChange,
@@ -106,6 +103,13 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
     message.status === "completed" ||
     message.status === "error" ||
     message.status === "stopped";
+
+  // Final task duration for the footer: first recursion start → last
+  // recursion end. Only meaningful once the task has settled; the live
+  // counter lives in the Composer while running.
+  const taskStartTime = message.recursions?.[0]?.startTime ?? message.timestamp;
+  const taskEndTime = message.recursions?.at(-1)?.endTime;
+  const taskDurationSeconds = calculateDuration(taskStartTime, taskEndTime);
 
   // Plan review state
   const planReview = message.planReview;
@@ -176,15 +180,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
           const inputIndex = inputOffset + index;
           return (
             <div key={`${message.id}-${recursion.uid}`}>
-              <RecursionCard
-                messageId={message.id}
-                recursion={recursion}
-                taskId={message.task_id}
-                isExpanded={
-                  expandedRecursions[`${message.id}-${recursion.uid}`] ?? false
-                }
-                onToggle={onToggleRecursion}
-              />
+              <RecursionCard recursion={recursion} />
               {message.midTaskInputs?.[inputIndex] && (
                 <div className="mt-2 flex justify-end">
                   <div className="max-w-[85%] rounded-2xl rounded-br-none bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
@@ -343,6 +339,11 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
               <>
                 <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">Completed</span>
+                {taskEndTime && taskDurationSeconds > 0 && (
+                  <span className="ml-1 text-xs tabular-nums text-muted-foreground">
+                    • {taskDurationSeconds}s
+                  </span>
+                )}
                 {message.totalTokens && (
                   <TokenUsageLabel
                     tokens={message.totalTokens}

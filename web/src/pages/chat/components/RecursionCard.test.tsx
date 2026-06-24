@@ -25,10 +25,9 @@ function buildRecursion(
 }
 
 describe("RecursionCard", () => {
-  it("shows the rotating thinking ticker while reasoning tokens are still streaming", () => {
+  it("renders the thinking section while reasoning tokens are streaming", () => {
     render(
       <RecursionCard
-        messageId="message-1"
         recursion={buildRecursion({
           thinking: "Need to inspect the repo state.",
           events: [
@@ -41,64 +40,42 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
-    expect(screen.getByTestId("thinking-word-ticker")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Toggle thinking details" }),
     ).toHaveAttribute("aria-expanded", "true");
-    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+    // No shell title, no leaked protocol label, no ticker.
+    expect(screen.queryByText("CALL_TOOL")).not.toBeInTheDocument();
+    expect(screen.queryByText("Working...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed step")).not.toBeInTheDocument();
   });
 
-  it("replaces the fallback iteration title with the ticker until stable output exists", () => {
-    render(
+  it("renders nothing for a pure-tool iteration that has no content yet", () => {
+    const { container } = render(
       <RecursionCard
-        messageId="message-iteration"
         recursion={buildRecursion({
           iteration: 2,
-          events: [
-            {
-              type: "tool_call",
-              task_id: "task-iteration",
-              trace_id: "trace-iteration",
-              iteration: 2,
-              timestamp: "2026-03-24T00:00:00.000Z",
-              data: {
-                tool_calls: [
-                  {
-                    id: "call-iteration-1",
-                    name: "read_files",
-                    arguments: { path: "server/app" },
-                  },
-                ],
-                tool_results: [],
-                pending_arguments: true,
-              },
-            },
-          ],
+          // No thinking, no message, no events.
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
-    expect(screen.getByTestId("thinking-word-ticker")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Preparing read_files/i }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("Iteration 3")).not.toBeInTheDocument();
+    // The brief window between recursion_start and the first content event
+    // renders an empty stream — no placeholder label is leaked.
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByText("CALL_TOOL")).not.toBeInTheDocument();
   });
 
-  it("switches to the latest stable running label after visible output starts", () => {
+  it("renders the agent progress note as an aside line, never a button", () => {
     render(
       <RecursionCard
-        messageId="message-2"
         recursion={buildRecursion({
           thinking: "Need to inspect the repo state.",
           message: "Repository structure loaded.",
+          status: "completed",
+          endTime: "2026-03-24T00:00:03.000Z",
           events: [
             {
               type: "message",
@@ -109,29 +86,27 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
+    // The message is rendered as plain text, not a toggle button.
     expect(
-      screen.getAllByText("Repository structure loaded.").length,
-    ).toBeGreaterThan(0);
-    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+      screen.getByText("Repository structure loaded."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Repository structure loaded/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("collapses completed thinking by default while keeping it available", () => {
     render(
       <RecursionCard
-        messageId="message-thinking-complete"
         recursion={buildRecursion({
           thinking: "I compared the available implementation paths.",
           message: "Picked the smaller frontend-only change.",
           status: "completed",
           endTime: "2026-03-24T00:00:03.000Z",
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -143,52 +118,53 @@ describe("RecursionCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("calls the message toggle and shows execution details when expanded", async () => {
-    const user = userEvent.setup();
-    const onToggle = vi.fn();
-
-    const { rerender } = render(
+  it("never renders the raw action enum even when set on the record", () => {
+    // Regression: CALL_TOOL used to leak into the title via the
+    // `message || action` fallback. The data field still drives status
+    // transitions in the reducer, but the view must never surface it.
+    render(
       <RecursionCard
-        messageId="message-details"
         recursion={buildRecursion({
-          message: "Inspected the chat rendering flow.",
           action: "CALL_TOOL",
           status: "completed",
           endTime: "2026-03-24T00:00:04.000Z",
+          events: [
+            {
+              type: "tool_call",
+              task_id: "task-action",
+              trace_id: "trace-action",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:04.000Z",
+              data: {
+                tool_calls: [
+                  {
+                    id: "call-action",
+                    name: "read_file",
+                    arguments: { path: "README.md" },
+                  },
+                ],
+                tool_results: [
+                  {
+                    tool_call_id: "call-action",
+                    name: "read_file",
+                    result: "ok",
+                    success: true,
+                  },
+                ],
+              },
+            },
+          ],
         })}
-        isExpanded={false}
-        onToggle={onToggle}
       />,
     );
 
-    await user.click(
-      screen.getByRole("button", {
-        name: /Inspected the chat rendering flow/i,
-      }),
-    );
-    expect(onToggle).toHaveBeenCalledWith("message-details", "recursion-1");
-
-    rerender(
-      <RecursionCard
-        messageId="message-details"
-        recursion={buildRecursion({
-          message: "Inspected the chat rendering flow.",
-          action: "CALL_TOOL",
-          status: "completed",
-          endTime: "2026-03-24T00:00:04.000Z",
-        })}
-        isExpanded={true}
-        onToggle={onToggle}
-      />,
-    );
-
-    expect(screen.getByText("Action")).toBeInTheDocument();
+    expect(screen.queryByText("CALL_TOOL")).not.toBeInTheDocument();
+    expect(screen.queryByText("Action")).not.toBeInTheDocument();
   });
 
   it("keeps the message visible while tool execution is waiting on results", () => {
     render(
       <RecursionCard
-        messageId="message-3"
         recursion={buildRecursion({
           message: "Loaded project files",
           events: [
@@ -211,18 +187,13 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={true}
-        onToggle={vi.fn()}
       />,
     );
 
-    expect(
-      screen.getByRole("button", { name: /Loaded project files/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Loaded project files")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Running read_files/i }),
     ).toHaveTextContent("Running");
-    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 
   it("renders live write and edit payload previews with filename counters", async () => {
@@ -230,7 +201,6 @@ describe("RecursionCard", () => {
 
     render(
       <RecursionCard
-        messageId="message-live-tools"
         recursion={buildRecursion({
           message: "Updating files",
           events: [
@@ -290,8 +260,6 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -391,10 +359,7 @@ describe("RecursionCard", () => {
 
       const { rerender } = render(
         <RecursionCard
-          messageId="message-stream-counter"
           recursion={buildRecursion({ message: "Writing", events: [...events] })}
-          isExpanded={false}
-          onToggle={vi.fn()}
         />,
       );
 
@@ -416,10 +381,7 @@ describe("RecursionCard", () => {
 
         rerender(
           <RecursionCard
-            messageId="message-stream-counter"
             recursion={buildRecursion({ message: "Writing", events: [...events] })}
-            isExpanded={false}
-            onToggle={vi.fn()}
           />,
         );
 
@@ -436,12 +398,7 @@ describe("RecursionCard", () => {
       // tool_payload_delta can reach the frontend before the first tool_call
       // event (the backend emits deltas as soon as args start streaming, and
       // the finalized tool_call only lands once the whole args JSON parses).
-      // Before the fix, the card was keyed solely off tool_call events, so the
-      // streaming payload had nowhere to attach -- both filename and counter
-      // disappeared even though content was visibly flowing into the preview.
       const content = "line1\nline2\nline3\n";
-      // Stream the full arguments JSON in two fragments, but send NO tool_call
-      // event at all -- simulating the window before it arrives.
       const fullRaw = JSON.stringify({ path: "src/app.ts", content });
       const events: RecursionRecord["events"] = [
         {
@@ -472,15 +429,10 @@ describe("RecursionCard", () => {
 
       render(
         <RecursionCard
-          messageId="message-delta-first"
           recursion={buildRecursion({ message: "Writing", events: [...events] })}
-          isExpanded={false}
-          onToggle={vi.fn()}
         />,
       );
 
-      // The placeholder card built from the delta must show the tool name,
-      // the filename (basename of the streamed path), and the live +N counter.
       const writeTool = screen.getByRole("button", {
         name: /Preparing write_file|Running write_file/i,
       });
@@ -498,7 +450,6 @@ describe("RecursionCard", () => {
 
     render(
       <RecursionCard
-        messageId="message-long-write"
         recursion={buildRecursion({
           message: "Writing a large file",
           events: [
@@ -531,8 +482,6 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -553,7 +502,6 @@ describe("RecursionCard", () => {
 
     render(
       <RecursionCard
-        messageId="message-edit-lines"
         recursion={buildRecursion({
           message: "Editing a file",
           events: [
@@ -586,8 +534,6 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -609,7 +555,6 @@ describe("RecursionCard", () => {
 
     render(
       <RecursionCard
-        messageId="message-edit-result-diff"
         recursion={buildRecursion({
           message: "Editing a file",
           events: [
@@ -649,8 +594,6 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -668,7 +611,6 @@ describe("RecursionCard", () => {
 
     render(
       <RecursionCard
-        messageId="message-tools"
         recursion={buildRecursion({
           message: "Ran file checks",
           status: "completed",
@@ -739,8 +681,6 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -828,14 +768,11 @@ describe("RecursionCard", () => {
 
     const { rerender } = render(
       <RecursionCard
-        messageId="message-tools-running"
         recursion={buildRecursion({
           message: "Running checks",
           status: "running",
           events: baseEvents,
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -849,7 +786,6 @@ describe("RecursionCard", () => {
 
     rerender(
       <RecursionCard
-        messageId="message-tools-running"
         recursion={buildRecursion({
           message: "Running checks",
           status: "running",
@@ -871,8 +807,6 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -887,7 +821,6 @@ describe("RecursionCard", () => {
   it("keeps failed tool results from falling back to preparing", () => {
     render(
       <RecursionCard
-        messageId="message-failed-reversed"
         recursion={buildRecursion({
           message: "Lint failed",
           status: "completed",
@@ -930,8 +863,6 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -952,7 +883,6 @@ describe("RecursionCard", () => {
 
     render(
       <RecursionCard
-        messageId="message-copy-tool"
         recursion={buildRecursion({
           message: "Read file",
           status: "completed",
@@ -984,8 +914,6 @@ describe("RecursionCard", () => {
             },
           ],
         })}
-        isExpanded={false}
-        onToggle={vi.fn()}
       />,
     );
 
@@ -997,7 +925,7 @@ describe("RecursionCard", () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Copy Result" }));
-    expect(writeText).toHaveBeenLastCalledWith("file contents");
+    expect(writeText).toHaveBeenCalledWith("file contents");
     expect(screen.getByRole("button", { name: "Copied Result" })).toBeInTheDocument();
   });
 });

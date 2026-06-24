@@ -739,9 +739,6 @@ function ChatContainer({
   const [planReviewSubmitting, setPlanReviewSubmitting] = useState<boolean>(false);
   const [pendingMidTaskInput, setPendingMidTaskInput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expandedRecursions, setExpandedRecursions] = useState<
-    Record<string, boolean>
-  >({});
   const [replyTaskId, setReplyTaskId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionListItem[]>(
     initialSessions ?? [],
@@ -830,7 +827,7 @@ function ChatContainer({
     string | null
   >(null);
   const [selectedThinkingMode, setSelectedThinkingMode] =
-    useState<ChatThinkingMode | null>("disabled");
+    useState<ChatThinkingMode | null>("enabled");
   const [runtimeSkills, setRuntimeSkills] = useState<MandatorySkillSelection[]>(
     [],
   );
@@ -1030,11 +1027,11 @@ function ChatContainer({
   }, []);
 
   /**
-   * Reset the thinking toggle to its default (disabled) whenever the primary
+   * Reset the thinking toggle to its default (enabled) whenever the primary
    * LLM changes. Thinking is a per-task choice now — every LLM supports it.
    */
   useEffect(() => {
-    setSelectedThinkingMode(primaryLlmId ? "disabled" : null);
+    setSelectedThinkingMode(primaryLlmId ? "enabled" : null);
   }, [primaryLlmId]);
 
   /**
@@ -3840,18 +3837,6 @@ function ChatContainer({
   }, [handlePlanDecision, updateMessages]);
 
   /**
-   * Tracks recursion accordion state per message without leaking that detail into message models.
-   */
-  const toggleRecursion = useCallback((messageId: string, recursionUid: string) => {
-    pauseAutoScroll();
-    const key = `${messageId}-${recursionUid}`;
-    setExpandedRecursions((previous) => ({
-      ...previous,
-      [key]: !previous[key],
-    }));
-  }, [pauseAutoScroll]);
-
-  /**
    * Mirrors the latest composer draft into a ref so send and estimate paths
    * can read it without promoting each keystroke into top-level React state.
    */
@@ -4471,6 +4456,29 @@ function ChatContainer({
     () => deriveComposerTaskPlan(messages),
   [messages],
   );
+  // Live task telemetry for the active task, surfaced in the composer while
+  // streaming. Mirrors the lookup used by syncLiveRefsFromMessages so the
+  // composer reflects the same task the timeline is animating.
+  const liveTaskTelemetry = useMemo(() => {
+    const runningAssistant = [...messages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === "assistant" && message.status === "running",
+      );
+    if (!runningAssistant) {
+      return null;
+    }
+    const recursions = runningAssistant.recursions ?? [];
+    const activeRecursion = [...recursions]
+      .reverse()
+      .find((recursion) => recursion.status === "running");
+    return {
+      taskStartTime: recursions[0]?.startTime ?? runningAssistant.timestamp,
+      tokensPerSecond: activeRecursion?.liveTokensPerSecond,
+      estimatedCompletionTokens: activeRecursion?.estimatedCompletionTokens,
+    };
+  }, [messages]);
   const replyTarget = useMemo(
     () => findReplyTarget(messages, replyTaskId),
     [messages, replyTaskId],
@@ -4545,9 +4553,7 @@ function ChatContainer({
             <ConversationView
               messages={messages}
               agentName={agentName}
-              expandedRecursions={expandedRecursions}
               isStreaming={isStreaming}
-              onToggleRecursion={toggleRecursion}
               onReplyTask={setReplyTaskId}
               onEditSubmit={handleEditSubmit}
               onApproveSkillChange={handleApproveSkillChange}
@@ -4585,6 +4591,7 @@ function ChatContainer({
         replyTarget={replyTarget}
         pendingFiles={pendingFiles}
         isStreaming={isStreaming}
+        liveTaskTelemetry={liveTaskTelemetry}
         canSendMessage={
           staleSessionId === null &&
           migratedSessionId === null &&
