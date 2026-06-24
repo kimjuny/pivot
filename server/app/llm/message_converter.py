@@ -57,6 +57,12 @@ def to_openai_completion_messages(
                 "role": "assistant",
                 "content": to_openai_completion_content(content),
             }
+            reasoning = msg.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                # DeepSeek / Qwen / Kimi / GLM and other OpenAI-compatible
+                # endpoints accept the assistant's prior reasoning_content on
+                # history messages to continue the chain-of-thought.
+                entry["reasoning_content"] = reasoning
             if tool_calls:
                 entry["tool_calls"] = [
                     {
@@ -124,6 +130,20 @@ def to_openai_response_messages(
                 out.append({"role": "system", "content": content})
 
         elif role == "assistant":
+            reasoning = msg.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                # Responses API carries chain-of-thought as standalone
+                # ``reasoning`` items in the input array, preceding the
+                # assistant's visible output and tool calls.
+                out.append(
+                    {
+                        "type": "reasoning",
+                        "content": [
+                            {"type": "reasoning_text", "text": reasoning}
+                        ],
+                    }
+                )
+
             converted = to_openai_response_content(content, "assistant")
             if isinstance(converted, str) and converted:
                 out.append(
@@ -200,15 +220,21 @@ def to_anthropic_messages(
                 system_message = content
 
         elif role == "assistant":
-            if tool_calls:
-                # Must use block format when tool_calls present
+            reasoning = msg.get("reasoning_content")
+            has_reasoning = isinstance(reasoning, str) and bool(reasoning)
+            if tool_calls or has_reasoning:
+                # Must use block format when tool_calls or thinking present.
+                # Anthropic requires the thinking block to precede text and
+                # tool_use blocks so the chain-of-thought continues correctly.
                 blocks: list[dict[str, Any]] = []
+                if has_reasoning:
+                    blocks.append({"type": "thinking", "thinking": reasoning})
                 converted = to_anthropic_content(content)
                 if isinstance(converted, str) and converted:
                     blocks.append({"type": "text", "text": converted})
                 elif isinstance(converted, list):
                     blocks.extend(converted)
-                for tc in tool_calls:
+                for tc in tool_calls or []:
                     inp = json.loads(tc["arguments"]) if tc.get("arguments") else {}
                     blocks.append(
                         {
@@ -285,6 +311,13 @@ def to_gemini_messages(
             converted = to_gemini_content(content)
 
             parts: list[dict[str, Any]] = []
+            if role == "assistant":
+                reasoning = msg.get("reasoning_content")
+                if isinstance(reasoning, str) and reasoning:
+                    # Gemini surfaces prior reasoning as a ``thought`` part so
+                    # the model continues its chain-of-thought across turns.
+                    parts.append({"text": reasoning, "thought": True})
+
             if isinstance(converted, str):
                 parts.append({"text": converted})
             elif isinstance(converted, list):

@@ -9,16 +9,9 @@ import {
 
 import {
   deleteChatFile,
-  getUsableLLMById,
   type FileUploadSource,
   uploadChatFile,
 } from "@/utils/api";
-import {
-  getChatThinkingModes,
-  getDefaultChatThinkingMode,
-  llmHasThinkingSelector,
-  type ChatThinkingMode,
-} from "@/utils/llmThinking";
 import type { LLMUsable } from "@/types";
 
 import type { PendingUploadItem } from "../types";
@@ -36,68 +29,10 @@ export function useChatUploads(
   prefetchedLlm?: LLMUsable | null,
 ) {
   const [pendingFiles, setPendingFiles] = useState<PendingUploadItem[]>([]);
-  const [supportsThinkingSelector, setSupportsThinkingSelector] =
-    useState<boolean>(false);
-  const [thinkingModes, setThinkingModes] = useState<ChatThinkingMode[]>([]);
-  const [defaultThinkingMode, setDefaultThinkingMode] =
-    useState<ChatThinkingMode>("auto");
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
   const pendingFilesRef = useRef<PendingUploadItem[]>([]);
-
-  /**
-   * Resolves primary model capabilities so unavailable upload paths never appear as affordances.
-   */
-  useEffect(() => {
-    let isCancelled = false;
-
-    if (!primaryLlmId) {
-      setSupportsThinkingSelector(false);
-      setThinkingModes([]);
-      setDefaultThinkingMode("fast");
-      return () => {
-        isCancelled = true;
-      };
-    }
-
-    if (prefetchedLlm) {
-      setSupportsThinkingSelector(llmHasThinkingSelector(prefetchedLlm));
-      setThinkingModes(getChatThinkingModes(prefetchedLlm));
-      setDefaultThinkingMode(getDefaultChatThinkingMode(prefetchedLlm));
-      return () => {
-        isCancelled = true;
-      };
-    }
-
-    setSupportsThinkingSelector(false);
-    setThinkingModes([]);
-    setDefaultThinkingMode("fast");
-
-    const loadPrimaryLlm = async () => {
-      try {
-        const llm = await getUsableLLMById(primaryLlmId);
-        if (!isCancelled) {
-          setSupportsThinkingSelector(llmHasThinkingSelector(llm));
-          setThinkingModes(getChatThinkingModes(llm));
-          setDefaultThinkingMode(getDefaultChatThinkingMode(llm));
-        }
-      } catch (error) {
-        if (!isCancelled) {
-          console.error("Failed to load primary LLM capabilities:", error);
-          setSupportsThinkingSelector(false);
-          setThinkingModes([]);
-          setDefaultThinkingMode("fast");
-        }
-      }
-    };
-
-    void loadPrimaryLlm();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [primaryLlmId, prefetchedLlm]);
 
   useEffect(() => {
     pendingFilesRef.current = pendingFiles;
@@ -349,9 +284,6 @@ export function useChatUploads(
     readyPendingFiles,
     hasUploadingFiles,
     supportsImageInput: true,
-    supportsThinkingSelector,
-    thinkingModes,
-    defaultThinkingMode,
     imageInputRef,
     documentInputRef,
     removePendingFile,

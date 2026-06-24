@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from app.llm.cache_policy import validate_cache_policy
-from app.llm.thinking_policy import validate_thinking_policy
 from app.models.access import AccessLevel, ResourceType
 from app.models.llm import LLM
 from app.services.access_service import AccessService
@@ -114,9 +113,6 @@ class LLMService:
         api_key: str,
         protocol: str,
         cache_policy: str,
-        thinking_policy: str,
-        thinking_effort: str | None,
-        thinking_budget_tokens: int | None,
         streaming: bool,
         image_input: bool,
         image_output: bool,
@@ -133,18 +129,7 @@ class LLMService:
             raise ValueError("use_scope must be 'all' or 'selected'.")
         if self.get_by_name(name) is not None:
             raise ValueError("LLM with this name already exists")
-        (
-            normalized_cache_policy,
-            normalized_thinking_policy,
-            normalized_thinking_effort,
-            normalized_thinking_budget_tokens,
-        ) = self._validate_policy_fields(
-            protocol=protocol,
-            cache_policy=cache_policy,
-            thinking_policy=thinking_policy,
-            thinking_effort=thinking_effort,
-            thinking_budget_tokens=thinking_budget_tokens,
-        )
+        normalized_cache_policy = validate_cache_policy(protocol, cache_policy)
         llm = LLM(
             name=name,
             created_by_user_id=user.id,
@@ -154,9 +139,6 @@ class LLMService:
             api_key=api_key,
             protocol=protocol,
             cache_policy=normalized_cache_policy,
-            thinking_policy=normalized_thinking_policy,
-            thinking_effort=normalized_thinking_effort,
-            thinking_budget_tokens=normalized_thinking_budget_tokens,
             streaming=streaming,
             image_input=image_input,
             image_output=image_output,
@@ -238,29 +220,8 @@ class LLMService:
 
         target_protocol = update_data.get("protocol", llm.protocol)
         target_cache_policy = update_data.get("cache_policy", llm.cache_policy)
-        target_thinking_policy = update_data.get(
-            "thinking_policy",
-            llm.thinking_policy,
-        )
-        target_thinking_effort = update_data.get(
-            "thinking_effort",
-            llm.thinking_effort,
-        )
-        target_thinking_budget_tokens = update_data.get(
-            "thinking_budget_tokens",
-            llm.thinking_budget_tokens,
-        )
-        (
-            update_data["cache_policy"],
-            update_data["thinking_policy"],
-            update_data["thinking_effort"],
-            update_data["thinking_budget_tokens"],
-        ) = self._validate_policy_fields(
-            protocol=target_protocol,
-            cache_policy=target_cache_policy,
-            thinking_policy=target_thinking_policy,
-            thinking_effort=target_thinking_effort,
-            thinking_budget_tokens=target_thinking_budget_tokens,
+        update_data["cache_policy"] = validate_cache_policy(
+            target_protocol, target_cache_policy
         )
 
         for key, value in update_data.items():
@@ -285,31 +246,3 @@ class LLMService:
         self.db.delete(llm)
         self.db.commit()
         return True
-
-    def _validate_policy_fields(
-        self,
-        *,
-        protocol: str,
-        cache_policy: str,
-        thinking_policy: str,
-        thinking_effort: str | None,
-        thinking_budget_tokens: int | None,
-    ) -> tuple[str, str, str | None, int | None]:
-        """Validate protocol-dependent cache and thinking settings."""
-        normalized_cache_policy = validate_cache_policy(protocol, cache_policy)
-        (
-            normalized_thinking_policy,
-            normalized_thinking_effort,
-            normalized_thinking_budget_tokens,
-        ) = validate_thinking_policy(
-            protocol,
-            thinking_policy,
-            thinking_effort,
-            thinking_budget_tokens,
-        )
-        return (
-            normalized_cache_policy,
-            normalized_thinking_policy,
-            normalized_thinking_effort,
-            normalized_thinking_budget_tokens,
-        )

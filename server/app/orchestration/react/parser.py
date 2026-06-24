@@ -71,16 +71,11 @@ def parse_react_output(content: str) -> ParsedReactDecision:
     action = _parse_action(raw_payload)
 
     message = _expect_optional_string(raw_payload.get("message"), "message")
-    thinking_next_turn = _expect_optional_bool(
-        raw_payload.get("thinking_next_turn"),
-        "thinking_next_turn",
-    )
 
     resolved_payload = dict(raw_payload)
     resolved_payload["action"] = action.to_dict()
     return ParsedReactDecision(
         message=message,
-        thinking_next_turn=thinking_next_turn,
         action=action,
         raw_payload=resolved_payload,
     )
@@ -120,15 +115,6 @@ def _parse_action(payload: dict[str, Any]) -> ParsedAction:
         action_type=normalized_action_type,
         output=dict(action_output),
     )
-
-
-def _expect_optional_bool(value: Any, field_name: str) -> bool | None:
-    """Return an optional boolean field after strict validation."""
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    raise ValueError(f"{field_name} must be a boolean when provided.")
 
 
 def _expect_optional_string(raw_value: Any, path: str) -> str:

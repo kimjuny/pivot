@@ -25,7 +25,6 @@ from .abstract_llm import (
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .message_converter import to_anthropic_messages
 from .openrouter_attribution import build_openrouter_attribution_headers
-from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +45,6 @@ class AnthropicLLM(AbstractLLM):
         model: str,
         api_key: str,
         cache_policy: str = DEFAULT_CACHE_POLICY,
-        thinking_policy: str = DEFAULT_THINKING_POLICY,
-        thinking_effort: str | None = None,
-        thinking_budget_tokens: int | None = None,
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
@@ -59,9 +55,6 @@ class AnthropicLLM(AbstractLLM):
             model: The model identifier to use (e.g., "claude-3-5-sonnet-20241022")
             api_key: API key for authentication
             cache_policy: Cache policy for prompt caching.
-            thinking_policy: Thinking/reasoning policy for extended thinking.
-            thinking_effort: Thinking effort level (e.g. "low", "medium", "high").
-            thinking_budget_tokens: Token budget for thinking.
             timeout: Request timeout in seconds. Defaults to 60 seconds.
             extra_config: Additional kwargs to pass to API calls.
 
@@ -75,20 +68,11 @@ class AnthropicLLM(AbstractLLM):
         if not api_key:
             raise ValueError("API key is required")
 
+        self.protocol = "anthropic_compatible"
         self.endpoint = endpoint
         self.model = model
         self.api_key = api_key
         self.cache_policy = validate_cache_policy("anthropic_compatible", cache_policy)
-        (
-            self.thinking_policy,
-            self.thinking_effort,
-            self.thinking_budget_tokens,
-        ) = validate_thinking_policy(
-            "anthropic_compatible",
-            thinking_policy,
-            thinking_effort,
-            thinking_budget_tokens,
-        )
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
 

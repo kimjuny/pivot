@@ -45,9 +45,6 @@ def _serialize_llm(llm: Any) -> dict[str, Any]:
         "api_key": llm.api_key,
         "protocol": llm.protocol,
         "cache_policy": llm.cache_policy,
-        "thinking_policy": llm.thinking_policy,
-        "thinking_effort": llm.thinking_effort,
-        "thinking_budget_tokens": llm.thinking_budget_tokens,
         "streaming": llm.streaming,
         "image_input": llm.image_input,
         "image_output": llm.image_output,
@@ -69,8 +66,6 @@ def _serialize_usable_llm(llm: Any) -> dict[str, Any]:
         "image_input": llm.image_input,
         "image_output": llm.image_output,
         "max_context": llm.max_context,
-        "thinking_policy": llm.thinking_policy,
-        "thinking_effort": llm.thinking_effort,
     }
 
 
@@ -241,9 +236,6 @@ async def create_llm(
             api_key=llm_data.api_key,
             protocol=llm_data.protocol,
             cache_policy=llm_data.cache_policy,
-            thinking_policy=llm_data.thinking_policy,
-            thinking_effort=llm_data.thinking_effort,
-            thinking_budget_tokens=llm_data.thinking_budget_tokens,
             streaming=llm_data.streaming,
             image_input=llm_data.image_input,
             image_output=llm_data.image_output,
@@ -413,12 +405,6 @@ async def update_llm(
         update_data["protocol"] = llm_data.protocol
     if llm_data.cache_policy is not None:
         update_data["cache_policy"] = llm_data.cache_policy
-    if llm_data.thinking_policy is not None:
-        update_data["thinking_policy"] = llm_data.thinking_policy
-    if "thinking_effort" in llm_data.model_fields_set:
-        update_data["thinking_effort"] = llm_data.thinking_effort
-    if "thinking_budget_tokens" in llm_data.model_fields_set:
-        update_data["thinking_budget_tokens"] = llm_data.thinking_budget_tokens
 
     if llm_data.streaming is not None:
         update_data["streaming"] = llm_data.streaming

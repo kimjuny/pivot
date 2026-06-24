@@ -35,7 +35,6 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator';
 import { LLMBrandAvatar } from '@/components/LLMBrandAvatar';
-import { formatThinkingPolicyLabel } from '@/utils/llmThinking';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -231,9 +230,6 @@ function LLMList() {
         api_key: llm.api_key,
         protocol: llm.protocol,
         cache_policy: llm.cache_policy,
-        thinking_policy: llm.thinking_policy,
-        thinking_effort: llm.thinking_effort,
-        thinking_budget_tokens: llm.thinking_budget_tokens,
         streaming: llm.streaming,
         image_input: llm.image_input,
         image_output: llm.image_output,
@@ -329,10 +325,6 @@ function LLMList() {
           api_key: (item.api_key as string) ?? '',
           protocol: (item.protocol as string) ?? 'openai_completion_llm',
           cache_policy: (item.cache_policy as string) ?? 'none',
-          thinking_policy: (item.thinking_policy as string) ?? 'auto',
-          thinking_effort: (item.thinking_effort as string) ?? null,
-          thinking_budget_tokens:
-            (item.thinking_budget_tokens as number | null) ?? null,
           streaming: (item.streaming as boolean) ?? true,
           image_input: (item.image_input as boolean) ?? false,
           image_output: (item.image_output as boolean) ?? false,
@@ -365,9 +357,6 @@ function LLMList() {
     api_key: string;
     protocol: string;
     cache_policy: string;
-    thinking_policy: string;
-    thinking_effort?: string | null;
-    thinking_budget_tokens?: number | null;
     streaming: boolean;
     image_input: boolean;
     image_output: boolean;
@@ -644,9 +633,6 @@ function LLMList() {
                 api_key: editingLLM.api_key,
                 protocol: editingLLM.protocol,
                 cache_policy: editingLLM.cache_policy,
-                thinking_policy: editingLLM.thinking_policy,
-                thinking_effort: editingLLM.thinking_effort ?? '',
-                thinking_budget_tokens: editingLLM.thinking_budget_tokens ?? null,
                 streaming: editingLLM.streaming,
                 image_input: editingLLM.image_input,
                 image_output: editingLLM.image_output,
@@ -690,7 +676,6 @@ interface LLMTableRowProps {
 function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowProps) {
   const capabilityLabels = [
     llm.cache_policy !== 'none' ? formatCachePolicyLabel(llm.cache_policy) : null,
-    formatThinkingPolicyLabel(llm.thinking_policy, llm.thinking_effort),
     llm.streaming ? 'Streaming' : null,
     llm.image_input ? 'Image Input' : null,
     llm.image_output ? 'Image Output' : null,

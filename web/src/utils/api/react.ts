@@ -168,7 +168,7 @@ export const startReactTask = async (payload: {
   session_id?: string | null;
   file_ids?: string[];
   web_search_provider?: string | null;
-  thinking_mode?: "auto" | "fast" | "thinking" | null;
+  thinking_enabled?: boolean;
   mandatory_skill_names?: string[];
 }): Promise<ReactTaskStartResponse> => {
   return apiRequest('/react/tasks', {

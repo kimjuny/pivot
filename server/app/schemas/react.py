@@ -46,9 +46,9 @@ class ReactChatRequest(AppBaseModel):
         default=None,
         description="Optional chat-selected provider key for abstract web search",
     )
-    thinking_mode: Literal["auto", "fast", "thinking"] | None = Field(
-        default=None,
-        description="Optional chat-selected thinking mode for the primary LLM",
+    thinking_enabled: bool = Field(
+        default=False,
+        description="Whether to enable provider thinking/reasoning for this task",
     )
     mandatory_skill_names: list[str] = Field(
         default_factory=list,

@@ -33,14 +33,6 @@ import {
   type LLMAccess,
 } from '@/utils/api';
 import ResourceAuthTab from '@/components/ResourceAuthTab';
-import {
-  THINKING_PROVIDER_OPTIONS,
-  buildThinkingPolicyFromEditorState,
-  getDefaultThinkingEditorState,
-  getThinkingEditorStateFromPolicy,
-  providerNeedsThinkingDetail,
-  type ThinkingProvider,
-} from '@/utils/llmThinking';
 
 /**
  * Editable LLM payload shared by the create and edit dialogs.
@@ -52,9 +44,6 @@ export interface LLMFormData {
   api_key: string;
   protocol: string;
   cache_policy: string;
-  thinking_policy: string;
-  thinking_effort: string;
-  thinking_budget_tokens: number | null;
   streaming: boolean;
   image_input: boolean;
   image_output: boolean;
@@ -215,57 +204,6 @@ const CACHE_POLICY_OPTIONS: Record<string, { value: string; label: string }[]> =
   ],
 };
 
-function getThinkingTooltipContent(
-  protocol: string,
-  provider: ThinkingProvider,
-  detailValue: string,
-): ReactNode {
-  let payloadHint = 'Current payload: no thinking override. Pivot sends nothing for this LLM.';
-
-  if (protocol === 'openai_completion_llm') {
-    if (provider === 'qwen') {
-      payloadHint = 'Current payload: {"enable_thinking": true | false}';
-    } else if (provider === 'completion_toggle') {
-      payloadHint =
-        'Current payload: {"thinking": {"type": "enabled" | "disabled"}}';
-    }
-  } else if (protocol === 'openai_response_llm') {
-    if (provider === 'doubao') {
-      payloadHint =
-        'Current payload: {"thinking": {"type": "enabled" | "disabled"}}';
-    } else if (provider === 'chatgpt') {
-      payloadHint =
-        'Current payload: {"reasoning": {"effort": "none" | "low" | "medium" | "high" | "xhigh"}}';
-    }
-  } else if (protocol === 'anthropic_compatible') {
-    if (provider === 'mimo') {
-      payloadHint =
-        'Current payload: {"thinking": {"type": "enabled" | "disabled"}}';
-    } else if (provider === 'claude') {
-      payloadHint =
-        detailValue === 'adaptive'
-          ? 'Current payload: {"thinking": {"type": "adaptive"}, "output_config": {"effort": "low" | "medium" | "high" | "max"}}'
-          : 'Current payload: {"thinking": {"type": "enabled", "budget_tokens": number}}';
-    }
-  } else if (protocol === 'gemini_compatible') {
-    if (provider === 'gemini') {
-      payloadHint =
-        detailValue === '25'
-          ? 'Current payload: {"generationConfig": {"thinkingConfig": {"thinkingBudget": -1 | number, "includeThoughts": true}}}'
-          : 'Current payload: {"generationConfig": {"thinkingConfig": {"thinkingLevel": "minimal" | "low" | "medium" | "high", "includeThoughts": true}}}';
-    }
-  }
-
-  return (
-    <div className="space-y-2">
-      <p>Choose a provider-specific thinking configuration. Auto means Pivot sends no thinking override for this LLM.</p>
-      <code className="block whitespace-pre-wrap break-all rounded bg-muted px-2 py-1 text-[11px]">
-        {payloadHint}
-      </code>
-    </div>
-  );
-}
-
 function FormLabel({ htmlFor, label, tooltip, required = false }: FormLabelProps) {
   return (
     <div className="flex items-center gap-1.5">
@@ -333,9 +271,6 @@ function LLMModal({
     api_key: '',
     protocol: 'openai_completion_llm',
     cache_policy: 'none',
-    thinking_policy: 'auto',
-    thinking_effort: '',
-    thinking_budget_tokens: null,
     streaming: true,
     image_input: false,
     image_output: false,
@@ -372,9 +307,6 @@ function LLMModal({
         api_key: initialData.api_key ?? '',
         protocol: initialData.protocol ?? 'openai_completion_llm',
         cache_policy: initialData.cache_policy ?? 'none',
-        thinking_policy: initialData.thinking_policy ?? 'auto',
-        thinking_effort: initialData.thinking_effort ?? '',
-        thinking_budget_tokens: initialData.thinking_budget_tokens ?? null,
         streaming: initialData.streaming ?? true,
         image_input: initialData.image_input ?? false,
         image_output: initialData.image_output ?? false,
@@ -390,9 +322,6 @@ function LLMModal({
         api_key: '',
         protocol: 'openai_completion_llm',
         cache_policy: 'none',
-        thinking_policy: 'auto',
-        thinking_effort: '',
-        thinking_budget_tokens: null,
         streaming: true,
         image_input: false,
         image_output: false,
@@ -454,42 +383,6 @@ function LLMModal({
     }
   }, [formData.protocol, formData.cache_policy]);
 
-  useEffect(() => {
-    const currentState = getThinkingEditorStateFromPolicy(
-      formData.protocol,
-      formData.thinking_policy,
-      formData.thinking_effort,
-      formData.thinking_budget_tokens,
-    );
-    const options = THINKING_PROVIDER_OPTIONS[formData.protocol] ?? [
-      { value: 'auto', label: 'Auto' },
-    ];
-    const isCurrentValid = options.some(
-      (option) => option.value === currentState.provider,
-    );
-    if (isCurrentValid) {
-      return;
-    }
-
-    const defaultState = getDefaultThinkingEditorState(formData.protocol, 'auto');
-    const normalizedThinking = buildThinkingPolicyFromEditorState(
-      formData.protocol,
-      defaultState.provider,
-      defaultState.detailValue,
-      defaultState.effortValue,
-      defaultState.budgetTokens,
-    );
-    setFormData((prev) => ({
-      ...prev,
-      ...normalizedThinking,
-    }));
-  }, [
-    formData.protocol,
-    formData.thinking_policy,
-    formData.thinking_effort,
-    formData.thinking_budget_tokens,
-  ]);
-
   const updateFormField = <K extends keyof LLMFormData>(
     field: K,
     value: LLMFormData[K],
@@ -497,41 +390,6 @@ function LLMModal({
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const applyThinkingEditorState = (
-    provider: ThinkingProvider,
-    detailValue: string,
-    effortValue: string,
-    budgetTokens: number | null,
-  ) => {
-    const normalizedThinking = buildThinkingPolicyFromEditorState(
-      formData.protocol,
-      provider,
-      detailValue,
-      effortValue,
-      budgetTokens,
-    );
-    setFormData((prev) => ({
-      ...prev,
-      ...normalizedThinking,
-    }));
-  };
-
-  const handleThinkingProviderChange = (provider: ThinkingProvider) => {
-    const defaultState = getDefaultThinkingEditorState(formData.protocol, provider);
-    applyThinkingEditorState(
-      defaultState.provider,
-      defaultState.detailValue,
-      defaultState.effortValue,
-      defaultState.budgetTokens,
-    );
-  };
-
-  const currentThinkingState = getThinkingEditorStateFromPolicy(
-    formData.protocol,
-    formData.thinking_policy,
-    formData.thinking_effort,
-    formData.thinking_budget_tokens,
-  );
   const activeTabIndex = activeTab === 'general' ? 0 : activeTab === 'advanced' ? 1 : 2;
 
   const handleSubmit = async () => {
@@ -814,325 +672,6 @@ function LLMModal({
                     autoComplete="off"
                   />
                 </div>
-              </div>
-
-              <div className="space-y-4 rounded-lg border border-border/60 p-4">
-                <div className="space-y-2">
-                  <FormLabel
-                    htmlFor="thinking_provider"
-                    label="Thinking"
-                    tooltip={getThinkingTooltipContent(
-                      formData.protocol,
-                      currentThinkingState.provider,
-                      currentThinkingState.detailValue,
-                    )}
-                  />
-                  <Select
-                    value={currentThinkingState.provider}
-                    onValueChange={(value) =>
-                      handleThinkingProviderChange(value as ThinkingProvider)
-                    }
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger id="thinking_provider">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(THINKING_PROVIDER_OPTIONS[formData.protocol] ?? []).map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {providerNeedsThinkingDetail(currentThinkingState.provider) && (
-                  <>
-                    {currentThinkingState.provider === 'qwen' && (
-                      <div className="space-y-2">
-                        <FormLabel
-                          htmlFor="thinking_qwen_enabled"
-                          label="Enable Thinking"
-                          tooltip="Qwen controls thinking through a boolean enable_thinking field."
-                        />
-                        <Select
-                          value={currentThinkingState.detailValue}
-                          onValueChange={(value) =>
-                            applyThinkingEditorState(
-                              currentThinkingState.provider,
-                              value,
-                              currentThinkingState.effortValue,
-                              currentThinkingState.budgetTokens,
-                            )
-                          }
-                          disabled={isSubmitting}
-                        >
-                          <SelectTrigger id="thinking_qwen_enabled">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="true">true</SelectItem>
-                            <SelectItem value="false">false</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-
-                    {['completion_toggle', 'doubao', 'mimo'].includes(
-                      currentThinkingState.provider,
-                    ) && (
-                      <div className="space-y-2">
-                        <FormLabel
-                          htmlFor="thinking_type"
-                          label="Thinking Type"
-                          tooltip="Most provider-compatible thinking APIs use enabled or disabled as the protocol value, including Doubao, GLM, MiMo, Kimi, and DeepSeek on Completion."
-                        />
-                        <Select
-                          value={currentThinkingState.detailValue}
-                          onValueChange={(value) =>
-                            applyThinkingEditorState(
-                              currentThinkingState.provider,
-                              value,
-                              currentThinkingState.effortValue,
-                              currentThinkingState.budgetTokens,
-                            )
-                          }
-                          disabled={isSubmitting}
-                        >
-                          <SelectTrigger id="thinking_type">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="enabled">enabled</SelectItem>
-                            <SelectItem value="disabled">disabled</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-
-                    {currentThinkingState.provider === 'chatgpt' && (
-                      <div className="space-y-2">
-                        <FormLabel
-                          htmlFor="thinking_effort"
-                          label="Reasoning Effort"
-                          tooltip="ChatGPT Responses reasoning is controlled through the reasoning.effort field."
-                        />
-                        <Select
-                          value={currentThinkingState.effortValue}
-                          onValueChange={(value) =>
-                            applyThinkingEditorState(
-                              currentThinkingState.provider,
-                              currentThinkingState.detailValue,
-                              value,
-                              currentThinkingState.budgetTokens,
-                            )
-                          }
-                          disabled={isSubmitting}
-                        >
-                          <SelectTrigger id="thinking_effort">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">none</SelectItem>
-                            <SelectItem value="low">low</SelectItem>
-                            <SelectItem value="medium">medium</SelectItem>
-                            <SelectItem value="high">high</SelectItem>
-                            <SelectItem value="xhigh">xhigh</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-
-                    {currentThinkingState.provider === 'claude' && (
-                      <>
-                        <div className="space-y-2">
-                          <FormLabel
-                            htmlFor="thinking_claude_mode"
-                            label="Thinking Mode"
-                            tooltip="Claude supports extended thinking with budget tokens, or adaptive thinking with an effort level."
-                          />
-                          <Select
-                            value={currentThinkingState.detailValue}
-                            onValueChange={(value) =>
-                              applyThinkingEditorState(
-                                currentThinkingState.provider,
-                                value,
-                                value === 'adaptive'
-                                  ? currentThinkingState.effortValue || 'high'
-                                  : '',
-                                value === 'enabled'
-                                  ? currentThinkingState.budgetTokens ?? 10000
-                                  : null,
-                              )
-                            }
-                            disabled={isSubmitting}
-                          >
-                            <SelectTrigger id="thinking_claude_mode">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="enabled">enabled</SelectItem>
-                              <SelectItem value="adaptive">adaptive</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {currentThinkingState.detailValue === 'enabled' && (
-                          <div className="space-y-2">
-                            <FormLabel
-                              htmlFor="thinking_budget_tokens"
-                              label="Budget Tokens"
-                              tooltip="Claude extended thinking requires an explicit budget_tokens value."
-                            />
-                            <Input
-                              id="thinking_budget_tokens"
-                              type="number"
-                              value={currentThinkingState.budgetTokens ?? ''}
-                              onChange={(e) =>
-                                applyThinkingEditorState(
-                                  currentThinkingState.provider,
-                                  currentThinkingState.detailValue,
-                                  currentThinkingState.effortValue,
-                                  Number.parseInt(e.target.value, 10) || 10000,
-                                )
-                              }
-                              disabled={isSubmitting}
-                              placeholder="10000"
-                              autoComplete="off"
-                            />
-                          </div>
-                        )}
-
-                        {currentThinkingState.detailValue === 'adaptive' && (
-                          <div className="space-y-2">
-                            <FormLabel
-                              htmlFor="thinking_adaptive_effort"
-                              label="Effort"
-                              tooltip="Claude adaptive thinking uses output_config.effort."
-                            />
-                            <Select
-                              value={currentThinkingState.effortValue}
-                              onValueChange={(value) =>
-                                applyThinkingEditorState(
-                                  currentThinkingState.provider,
-                                  currentThinkingState.detailValue,
-                                  value,
-                                  null,
-                                )
-                              }
-                              disabled={isSubmitting}
-                            >
-                              <SelectTrigger id="thinking_adaptive_effort">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="max">max</SelectItem>
-                                <SelectItem value="high">high</SelectItem>
-                                <SelectItem value="medium">medium</SelectItem>
-                                <SelectItem value="low">low</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-                      </>
-                    )}
-
-                    {currentThinkingState.provider === 'gemini' && (
-                      <>
-                        <div className="space-y-2">
-                          <FormLabel
-                            htmlFor="thinking_gemini_generation"
-                            label="Generation"
-                            tooltip="Gemini 2.5 models use thinkingBudget (token budget). Gemini 3.x models use thinkingLevel (effort tier)."
-                          />
-                          <Select
-                            value={currentThinkingState.detailValue}
-                            onValueChange={(value) =>
-                              applyThinkingEditorState(
-                                currentThinkingState.provider,
-                                value,
-                                value === '3x'
-                                  ? currentThinkingState.effortValue || 'medium'
-                                  : '',
-                                value === '25'
-                                  ? currentThinkingState.budgetTokens ?? -1
-                                  : null,
-                              )
-                            }
-                            disabled={isSubmitting}
-                          >
-                            <SelectTrigger id="thinking_gemini_generation">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="3x">Gemini 3.x (thinkingLevel)</SelectItem>
-                              <SelectItem value="25">Gemini 2.5 (thinkingBudget)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {currentThinkingState.detailValue === '3x' && (
-                          <div className="space-y-2">
-                            <FormLabel
-                              htmlFor="thinking_gemini_level"
-                              label="Thinking Level"
-                              tooltip="Gemini 3.x uses thinkingLevel in generationConfig.thinkingConfig."
-                            />
-                            <Select
-                              value={currentThinkingState.effortValue}
-                              onValueChange={(value) =>
-                                applyThinkingEditorState(
-                                  currentThinkingState.provider,
-                                  currentThinkingState.detailValue,
-                                  value,
-                                  currentThinkingState.budgetTokens,
-                                )
-                              }
-                              disabled={isSubmitting}
-                            >
-                              <SelectTrigger id="thinking_gemini_level">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="high">high</SelectItem>
-                                <SelectItem value="medium">medium</SelectItem>
-                                <SelectItem value="low">low</SelectItem>
-                                <SelectItem value="minimal">minimal</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-
-                        {currentThinkingState.detailValue === '25' && (
-                          <div className="space-y-2">
-                            <FormLabel
-                              htmlFor="thinking_gemini_budget"
-                              label="Thinking Budget"
-                              tooltip="Gemini 2.5 uses thinkingBudget. -1 = dynamic (default), 0 = disabled (Flash only)."
-                            />
-                            <Input
-                              id="thinking_gemini_budget"
-                              type="number"
-                              value={currentThinkingState.budgetTokens ?? ''}
-                              onChange={(e) =>
-                                applyThinkingEditorState(
-                                  currentThinkingState.provider,
-                                  currentThinkingState.detailValue,
-                                  currentThinkingState.effortValue,
-                                  Number.parseInt(e.target.value, 10) || -1,
-                                )
-                              }
-                              disabled={isSubmitting}
-                              placeholder="-1"
-                              autoComplete="off"
-                            />
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
               </div>
 
               <div className="space-y-3">

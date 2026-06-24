@@ -25,7 +25,7 @@ from app.llm.abstract_llm import (
     Response,
     UsageInfo,
 )
-from app.llm.thinking_policy import build_runtime_thinking_kwargs
+from app.llm.thinking import build_thinking_kwargs
 from app.llm.token_estimator import estimate_messages_tokens, estimate_text_tokens
 from app.llm.usage_accumulator import StreamingUsageAccumulator, usage_to_token_counter
 from app.models.agent import Agent
@@ -45,7 +45,7 @@ from app.services.react_state_service import ReactStateService
 from app.services.session_service import SessionService
 from app.services.task_attachment_service import TaskAttachmentService
 from fastapi.concurrency import run_in_threadpool
-from sqlmodel import Session, desc, select
+from sqlmodel import Session
 
 from .context import ReactContext
 from .json_stream import EmitBuffer, StreamingFieldExtractor
@@ -116,7 +116,7 @@ class ReactEngine:
         tool_execution_context: ToolExecutionContext | None = None,
         stream_llm_responses: bool = True,
         llm_runtime_kwargs: dict[str, Any] | None = None,
-        thinking_runtime_config: dict[str, Any] | None = None,
+        thinking_enabled: bool = False,
     ) -> None:
         """
         Initialize ReAct engine.
@@ -132,7 +132,7 @@ class ReactEngine:
         self.tool_execution_context = tool_execution_context
         self.stream_llm_responses = stream_llm_responses
         self.llm_runtime_kwargs = llm_runtime_kwargs or {}
-        self.thinking_runtime_config = thinking_runtime_config or {}
+        self.thinking_enabled = thinking_enabled
         self.runtime_service = ReactRuntimeService(db)
         self.state_service = ReactStateService(db)
         self.cancelled = False  # Flag to signal cancellation
@@ -144,144 +144,14 @@ class ReactEngine:
         self._prev_steps_json: str = ""
         self._steps_unchanged_count: int = 0
 
-    def _previous_recursion_failed(self, task: ReactTask) -> bool:
-        """Return whether the latest persisted recursion ended in failure.
+    def _build_thinking_kwargs(self) -> dict[str, Any]:
+        """Translate the per-task thinking flag into provider request kwargs.
 
-        Why: Auto thinking should stay cheap for normal steady-state execution,
-        but it should unlock deeper reasoning when the agent needs to recover
-        from the previous recursion failing, especially after tool errors.
-
-        Args:
-            task: Task whose latest recursion should be inspected.
-
-        Returns:
-            ``True`` when the previous recursion failed at the recursion level or
-            any tool call in that recursion reported an error.
+        Both directions go through ``build_thinking_kwargs``: for some
+        providers (OpenAI Responses, Gemini) "disabled" must explicitly send
+        a turn-off signal, not just omit the parameter.
         """
-        if task.id is None:
-            return False
-
-        statement = (
-            select(ReactRecursion)
-            .where(ReactRecursion.react_task_id == task.id)
-            .order_by(desc(ReactRecursion.iteration_index), desc(ReactRecursion.id))
-        )
-        previous_recursion = self.db.exec(statement).first()
-        if previous_recursion is None:
-            return False
-        if previous_recursion.status == "error":
-            return True
-
-        raw_tool_results = previous_recursion.tool_call_results
-        if not raw_tool_results:
-            return False
-
-        try:
-            parsed_tool_results = json.loads(raw_tool_results)
-        except json.JSONDecodeError:
-            logger.warning(
-                "Failed to parse tool_call_results while resolving Auto thinking. "
-                "task_id=%s trace_id=%s",
-                task.task_id,
-                previous_recursion.trace_id,
-            )
-            return True
-
-        if not isinstance(parsed_tool_results, list):
-            return True
-
-        for item in parsed_tool_results:
-            if not isinstance(item, dict):
-                continue
-            if item.get("success") is False:
-                return True
-            error_message = item.get("error")
-            if isinstance(error_message, str) and error_message.strip():
-                return True
-        return False
-
-    def _build_iteration_llm_runtime_kwargs(self, task: ReactTask) -> dict[str, Any]:
-        """Build runtime LLM kwargs for the current recursion.
-
-        Args:
-            task: Task whose current recursion is about to run.
-
-        Returns:
-            Provider kwargs combining static settings with dynamic thinking mode.
-        """
-        runtime_kwargs = dict(self.llm_runtime_kwargs)
-        if not self.thinking_runtime_config:
-            return runtime_kwargs
-        previous_iteration_failed = self._previous_recursion_failed(task)
-
-        runtime_kwargs.update(
-            build_runtime_thinking_kwargs(
-                protocol=str(self.thinking_runtime_config["protocol"]),
-                thinking_policy=str(self.thinking_runtime_config["thinking_policy"]),
-                thinking_effort=self.thinking_runtime_config.get("thinking_effort"),
-                thinking_budget_tokens=self.thinking_runtime_config.get(
-                    "thinking_budget_tokens"
-                ),
-                thinking_mode=self.thinking_runtime_config.get("thinking_mode"),
-                iteration_index=task.iteration,
-                next_turn_thinking=(
-                    None
-                    if previous_iteration_failed
-                    else self._previous_recursion_requested_thinking(task)
-                ),
-                previous_iteration_failed=previous_iteration_failed,
-            )
-        )
-        return runtime_kwargs
-
-    def _previous_recursion_requested_thinking(
-        self,
-        task: ReactTask,
-    ) -> bool | None:
-        """Return the previous recursion's Auto-mode thinking hint.
-
-        Why: the prompt contract lets the agent choose whether the next
-        recursion should think deeply. We persist raw assistant messages in the
-        session runtime window already, so Auto mode can recover that hint
-        without introducing extra task schema state.
-
-        Args:
-            task: Task whose latest assistant decision should be inspected.
-
-        Returns:
-            ``True`` or ``False`` when the latest current-task assistant payload
-            contains ``thinking_next_turn``; otherwise ``None``.
-        """
-        if not task.session_id:
-            return None
-
-        try:
-            runtime_state = self.runtime_service.load(task)
-        except RuntimeError:
-            return None
-
-        start_index = max(task.runtime_message_start_index, 0)
-        task_messages = runtime_state.messages[start_index:]
-        for message in reversed(task_messages):
-            if message.get("role") != "assistant":
-                continue
-
-            content = message.get("content")
-            if not isinstance(content, str) or not content.strip():
-                continue
-
-            try:
-                decision = parse_react_output(content)
-            except ValueError:
-                logger.warning(
-                    "Failed to parse previous assistant payload while resolving "
-                    "Auto thinking. task_id=%s",
-                    task.task_id,
-                )
-                return None
-            return decision.thinking_next_turn
-
-        return None
+        return build_thinking_kwargs(self.llm, enabled=self.thinking_enabled)
 
     def _new_token_counter(self) -> dict[str, int]:
         """Create a token counter used across parse retries.
@@ -2717,7 +2587,8 @@ class ReactEngine:
                 messages_for_llm = runtime_state.messages
                 used_incremental_request_messages = False
                 llm_chat_kwargs: dict[str, Any] = {
-                    **self._build_iteration_llm_runtime_kwargs(task),
+                    **self.llm_runtime_kwargs,
+                    **self._build_thinking_kwargs(),
                     "_pivot_task_id": task.task_id,
                 }
                 if (
@@ -2994,6 +2865,7 @@ class ReactEngine:
                         runtime_state = self.runtime_service.append_assistant_message(
                             task,
                             assistant_message or "",
+                            reasoning_content=event_data.get("thinking"),
                             tool_calls=event_tool_calls if has_tool_calls else None,
                         )
                         self._log_messages_pretty(

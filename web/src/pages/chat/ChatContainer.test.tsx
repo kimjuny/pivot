@@ -257,13 +257,9 @@ describe("ChatContainer session rollover", () => {
     });
     vi.mocked(getLLMById).mockResolvedValue({
       image_input: false,
-      thinking_policy: "auto",
-      thinking_effort: null,
     } as Awaited<ReturnType<typeof getLLMById>>);
     vi.mocked(getUsableLLMById).mockResolvedValue({
       image_input: false,
-      thinking_policy: "auto",
-      thinking_effort: null,
     } as Awaited<ReturnType<typeof getUsableLLMById>>);
     vi.mocked(createProject).mockResolvedValue({
       id: 1,
@@ -655,7 +651,7 @@ describe("ChatContainer session rollover", () => {
       task_id: null,
       file_ids: [],
       web_search_provider: null,
-      thinking_mode: null,
+      thinking_enabled: false,
       mandatory_skill_names: [],
     });
   });
@@ -827,7 +823,7 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: ["file-markdown-1"],
         web_search_provider: null,
-        thinking_mode: null,
+        thinking_enabled: false,
         mandatory_skill_names: [],
       });
     });
@@ -960,7 +956,7 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: [],
         web_search_provider: "pivot@test-b",
-        thinking_mode: null,
+        thinking_enabled: false,
         mandatory_skill_names: [],
       });
     });
@@ -1062,8 +1058,6 @@ describe("ChatContainer session rollover", () => {
     vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
     vi.mocked(getUsableLLMById).mockResolvedValue({
       image_input: false,
-      thinking_policy: "openai-response-reasoning-effort",
-      thinking_effort: "high",
     } as Awaited<ReturnType<typeof getUsableLLMById>>);
     vi.mocked(startReactTask).mockResolvedValue({
       task_id: "task-thinking",
@@ -1101,10 +1095,9 @@ describe("ChatContainer session rollover", () => {
     });
 
     await user.click(screen.getByRole("combobox", { name: "Thinking mode" }));
-    expect(screen.getByRole("option", { name: "Auto" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Fast" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Thinking" })).toBeInTheDocument();
-    await user.click(screen.getByRole("option", { name: "Auto" }));
+    expect(screen.getByRole("option", { name: "Fast" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Thinking" }));
 
     await user.type(screen.getByPlaceholderText("Ask anything"), "Think first");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -1117,7 +1110,7 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: [],
         web_search_provider: null,
-        thinking_mode: "auto",
+        thinking_enabled: true,
         mandatory_skill_names: [],
       });
     });
@@ -1127,8 +1120,6 @@ describe("ChatContainer session rollover", () => {
     vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
     vi.mocked(getUsableLLMById).mockResolvedValue({
       image_input: false,
-      thinking_policy: "openai-response-reasoning-effort",
-      thinking_effort: "high",
     } as Awaited<ReturnType<typeof getUsableLLMById>>);
     vi.mocked(startReactTask).mockResolvedValue({
       task_id: "task-fast",
@@ -1178,18 +1169,16 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: [],
         web_search_provider: null,
-        thinking_mode: "fast",
+        thinking_enabled: false,
         mandatory_skill_names: [],
       });
     });
   });
 
-  it("shows only Fast when the stored thinking tier is already disabled", async () => {
+  it("always shows Enabled and Disabled thinking options", async () => {
     vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
     vi.mocked(getUsableLLMById).mockResolvedValue({
       image_input: false,
-      thinking_policy: "qwen-disable-thinking",
-      thinking_effort: null,
     } as Awaited<ReturnType<typeof getUsableLLMById>>);
 
     const user = userEvent.setup();
@@ -1209,11 +1198,8 @@ describe("ChatContainer session rollover", () => {
     });
 
     await user.click(screen.getByRole("combobox", { name: "Thinking mode" }));
-    expect(screen.queryByRole("option", { name: "Auto" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Thinking" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Fast" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("option", { name: "Thinking" }),
-    ).not.toBeInTheDocument();
   });
 
   it("hides the provider selector when the agent cannot use web_search", async () => {
@@ -1556,7 +1542,7 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: [],
         web_search_provider: null,
-        thinking_mode: null,
+        thinking_enabled: false,
         mandatory_skill_names: [],
       });
     });
@@ -1925,7 +1911,7 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: [],
         web_search_provider: null,
-        thinking_mode: null,
+        thinking_enabled: false,
         mandatory_skill_names: [],
       });
     });
@@ -2360,7 +2346,7 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: [],
         web_search_provider: null,
-        thinking_mode: null,
+        thinking_enabled: false,
         mandatory_skill_names: [],
       });
     });

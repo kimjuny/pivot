@@ -1,11 +1,9 @@
 """Unit tests for strict ReAct parser behavior."""
 
-import json
 import sys
 import unittest
 from importlib import import_module
 from pathlib import Path
-from types import SimpleNamespace
 
 # The backend code imports from the ``app`` package root. unittest discovery
 # does not add ``server/`` to sys.path automatically, so tests do it explicitly.
@@ -15,162 +13,43 @@ if str(SERVER_ROOT) not in sys.path:
 
 react_parser = import_module("app.orchestration.react.parser")
 parse_react_output = react_parser.parse_react_output
-parse_react_control_section = react_parser.parse_react_control_section
-collect_complete_payload_blocks = react_parser.collect_complete_payload_blocks
-resolve_tool_call_payloads = react_parser.resolve_tool_call_payloads
-ToolCallRequest = import_module("app.orchestration.react.types").ToolCallRequest
-
-
-class _StubToolManager:
-    """Minimal tool manager stub for schema-aware payload decoding tests."""
-
-    def __init__(self, tool_schemas: dict[str, dict[str, object]]) -> None:
-        self._tool_schemas = tool_schemas
-
-    def get_tool(self, name: str) -> object | None:
-        parameters = self._tool_schemas.get(name)
-        if parameters is None:
-            return None
-        return SimpleNamespace(parameters=parameters)
+safe_load_json = react_parser.safe_load_json
 
 
 class ReactParserTestCase(unittest.TestCase):
     """Validate the strict ReAct parser contract."""
 
-    def test_parse_call_tool_with_payload_blocks(self) -> None:
-        """CALL_TOOL payload blocks should resolve into typed tool arguments."""
+    def test_parse_call_tool(self) -> None:
+        """A minimal CALL_TOOL decision should parse into a typed decision."""
         content = """
 {
   "message": "Reading the requested file",
-  "thinking_next_turn": true,
   "action": {
     "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "batch": 2,
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"},
-            "options": {"$payload_ref": "options_payload"}
-          }
-        }
-      ]
-    }
+    "output": {}
   }
 }
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"/tmp/demo.txt"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-<<<PIVOT_PAYLOAD:options_payload:BEGIN_6F2D9C1A>>>
-{"encoding":"utf-8"}
-<<<PIVOT_PAYLOAD:options_payload:END_6F2D9C1A>>>
 """.strip()
 
         decision = parse_react_output(content)
 
         self.assertEqual(decision.action.action_type, "CALL_TOOL")
         self.assertEqual(decision.message, "Reading the requested file")
-        self.assertIs(decision.thinking_next_turn, True)
-        self.assertEqual(len(decision.action.tool_calls), 1)
-        self.assertEqual(decision.action.tool_calls[0].batch, 2)
-        self.assertEqual(
-            decision.action.tool_calls[0].arguments,
-            {
-                "path": "/tmp/demo.txt",
-                "options": {"encoding": "utf-8"},
-            },
-        )
+        self.assertEqual(decision.action.output, {})
 
-    def test_parse_call_tool_tolerates_payload_markdown_fence(self) -> None:
-        """A mistaken ```text wrapper around payload blocks should be stripped."""
-        content = """
-{
-  "message": "Reading the requested file",
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "batch": 1,
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"}
-          }
-        }
-      ]
-    }
-  }
-}
-```text
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"/tmp/demo.txt"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-```
-""".strip()
-
-        decision = parse_react_output(content)
-
-        self.assertEqual(decision.action.action_type, "CALL_TOOL")
-        self.assertEqual(
-            decision.action.tool_calls[0].arguments,
-            {"path": "/tmp/demo.txt"},
-        )
-
-    def test_parse_control_section_keeps_payload_refs_for_stream_preview(self) -> None:
-        """Early control parsing should not require completed payload bodies."""
-        content = """
-{
-  "message": "Reading the requested file",
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "batch": 1,
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"}
-          }
-        }
-      ]
-    }
-  }
-}
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-""".strip()
-
-        decision = parse_react_control_section(content)
-
-        self.assertEqual(decision.message, "Reading the requested file")
-        self.assertEqual(decision.action.action_type, "CALL_TOOL")
-        self.assertEqual(
-            decision.action.tool_calls[0].arguments,
-            {"path": {"$payload_ref": "path_payload"}},
-        )
-        self.assertEqual(decision.action.tool_calls[0].batch, 1)
-
-    def test_parse_answer_with_payload_block(self) -> None:
-        """ANSWER payload blocks should resolve into the final markdown body."""
+    def test_parse_answer(self) -> None:
+        """An ANSWER decision should expose the answer body in action.output."""
         content = """
 {
   "message": "Task complete",
   "action": {
     "action_type": "ANSWER",
     "output": {
-      "answer": {"$payload_ref": "answer_payload"},
+      "answer": "# Final Answer\\n\\nEverything is ready.",
       "attachments": []
     }
   }
 }
-<<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>
-# Final Answer
-
-Everything is ready.
-<<<PIVOT_PAYLOAD:answer_payload:END_6F2D9C1A>>>
 """.strip()
 
         decision = parse_react_output(content)
@@ -181,224 +60,31 @@ Everything is ready.
             "# Final Answer\n\nEverything is ready.",
         )
 
-    def test_parse_answer_control_section_keeps_payload_ref_for_stream_preview(
-        self,
-    ) -> None:
-        """ANSWER previews should remain parseable before the payload is complete."""
+    def test_parse_clarify(self) -> None:
+        """A CLARIFY decision should preserve the question field."""
         content = """
 {
-  "message": "Task complete",
+  "message": "Need more info",
   "action": {
-    "action_type": "ANSWER",
+    "action_type": "CLARIFY",
     "output": {
-      "answer": {"$payload_ref": "answer_payload"},
-      "attachments": []
+      "question": "Which file?"
     }
   }
 }
-<<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>
-""".strip()
-
-        decision = parse_react_control_section(content)
-
-        self.assertEqual(decision.action.action_type, "ANSWER")
-        self.assertEqual(
-            decision.action.output["answer"],
-            {"$payload_ref": "answer_payload"},
-        )
-
-    def test_collect_complete_payload_blocks_ignores_incomplete_tail(self) -> None:
-        """Streaming payload collection should return only closed blocks."""
-        content = """
-{"action":{"action_type":"CALL_TOOL","output":{"tool_calls":[]}}}
-<<<PIVOT_PAYLOAD:ready_payload:BEGIN_6F2D9C1A>>>
-"ready"
-<<<PIVOT_PAYLOAD:ready_payload:END_6F2D9C1A>>>
-<<<PIVOT_PAYLOAD:pending_payload:BEGIN_6F2D9C1A>>>
-"pending
-""".strip()
-
-        self.assertEqual(
-            collect_complete_payload_blocks(content),
-            {"ready_payload": '"ready"'},
-        )
-
-    def test_resolve_single_tool_call_payloads(self) -> None:
-        """One preview call can be resolved without parsing the whole response."""
-        tool_call = ToolCallRequest(
-            id="call-1",
-            name="read_file",
-            batch=3,
-            arguments={"path": {"$payload_ref": "path_payload"}},
-        )
-        tool_manager = _StubToolManager(
-            {"read_file": {"properties": {"path": {"type": "string"}}}}
-        )
-
-        resolved = resolve_tool_call_payloads(
-            tool_call,
-            {"path_payload": '"README.md"'},
-            tool_manager=tool_manager,
-        )
-
-        self.assertEqual(resolved.id, "call-1")
-        self.assertEqual(resolved.batch, 3)
-        self.assertEqual(resolved.arguments, {"path": "README.md"})
-
-    def test_parse_call_tool_defaults_batch_to_one(self) -> None:
-        """CALL_TOOL batch remains optional for compatibility and defaults to one."""
-        content = """
-{
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"}
-          }
-        }
-      ]
-    }
-  }
-}
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"README.md"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
 """.strip()
 
         decision = parse_react_output(content)
 
-        self.assertEqual(decision.action.tool_calls[0].batch, 1)
-        self.assertEqual(
-            decision.action.tool_calls[0].to_dict(),
-            {
-                "id": "call-1",
-                "name": "read_file",
-                "batch": 1,
-                "arguments": {"path": "README.md"},
-            },
-        )
+        self.assertEqual(decision.action.action_type, "CLARIFY")
+        self.assertEqual(decision.action.output["question"], "Which file?")
 
-    def test_reject_invalid_tool_call_batch(self) -> None:
-        """CALL_TOOL batch must be a positive integer, not bool or string."""
-        invalid_batches = [
-            ("0", 0),
-            ("negative", -1),
-            ("bool", True),
-            ("string", "1"),
-        ]
-
-        for _label, invalid_batch in invalid_batches:
-            batch_json = (
-                f'"{invalid_batch}"'
-                if isinstance(invalid_batch, str)
-                else json.dumps(invalid_batch)
-            )
-            content = f"""
-{{
-  "action": {{
-    "action_type": "CALL_TOOL",
-    "output": {{
-      "tool_calls": [
-        {{
-          "id": "call-1",
-          "name": "read_file",
-          "batch": {batch_json},
-          "arguments": {{
-            "path": {{"$payload_ref": "path_payload"}}
-          }}
-        }}
-      ]
-    }}
-  }}
-}}
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"README.md"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-""".strip()
-
-            with (
-                self.subTest(invalid_batch=invalid_batch),
-                self.assertRaisesRegex(
-                    ValueError,
-                    r"action\.output\.tool_calls\[0\]\.batch must be a positive integer",
-                ),
-            ):
-                parse_react_output(content)
-
-    def test_reject_duplicate_tool_call_id(self) -> None:
-        """CALL_TOOL ids must be unique within one recursion."""
+    def test_unknown_fields_are_ignored(self) -> None:
+        """Extra envelope fields (e.g. legacy thinking_next_turn) are tolerated."""
         content = """
 {
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"}
-          }
-        },
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "arguments": {
-            "path": {"$payload_ref": "other_path_payload"}
-          }
-        }
-      ]
-    }
-  }
-}
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"README.md"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-<<<PIVOT_PAYLOAD:other_path_payload:BEGIN_6F2D9C1A>>>
-"package.json"
-<<<PIVOT_PAYLOAD:other_path_payload:END_6F2D9C1A>>>
-""".strip()
-
-        with self.assertRaisesRegex(ValueError, "Duplicate tool_call id: call-1"):
-            parse_react_output(content)
-
-    def test_reject_non_object_tool_arguments(self) -> None:
-        """CALL_TOOL arguments must be objects before payload resolution."""
-        content = """
-{
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "read_file",
-          "arguments": "not-an-object"
-        }
-      ]
-    }
-  }
-}
-<<<PIVOT_PAYLOAD:any_payload:BEGIN_6F2D9C1A>>>
-"unused"
-<<<PIVOT_PAYLOAD:any_payload:END_6F2D9C1A>>>
-""".strip()
-
-        with self.assertRaisesRegex(
-            ValueError,
-            r"action\.output\.tool_calls\[0\]\.arguments must be an object",
-        ):
-            parse_react_output(content)
-
-    def test_reject_non_boolean_thinking_next_turn(self) -> None:
-        """thinking_next_turn must be a boolean when present."""
-        content = """
-{
-  "thinking_next_turn": "yes",
+  "message": "ok",
+  "thinking_next_turn": true,
   "action": {
     "action_type": "ANSWER",
     "output": {}
@@ -406,109 +92,84 @@ Everything is ready.
 }
 """.strip()
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "thinking_next_turn must be a boolean",
-        ):
-            parse_react_output(content)
+        decision = parse_react_output(content)
 
-    def test_raw_string_payload_strips_block_terminator_newline(self) -> None:
-        """Raw string payloads should not inherit the formatting newline before END."""
+        self.assertEqual(decision.action.action_type, "ANSWER")
+        self.assertEqual(decision.message, "ok")
+
+    def test_missing_message_defaults_to_empty(self) -> None:
+        """An absent message field normalizes to an empty string."""
         content = """
 {
   "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "edit_file",
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"},
-            "old_string": {"$payload_ref": "old_payload"},
-            "new_string": {"$payload_ref": "new_payload"}
-          }
-        }
-      ]
-    }
+    "action_type": "ANSWER",
+    "output": {}
   }
 }
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"/workspace/example.txt"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-<<<PIVOT_PAYLOAD:old_payload:BEGIN_6F2D9C1A>>>
-export default App;
-<<<PIVOT_PAYLOAD:old_payload:END_6F2D9C1A>>>
-<<<PIVOT_PAYLOAD:new_payload:BEGIN_6F2D9C1A>>>
-
-<<<PIVOT_PAYLOAD:new_payload:END_6F2D9C1A>>>
 """.strip()
 
         decision = parse_react_output(content)
 
-        self.assertEqual(
-            decision.action.tool_calls[0].arguments["old_string"],
-            "export default App;",
-        )
-        self.assertEqual(decision.action.tool_calls[0].arguments["new_string"], "")
+        self.assertEqual(decision.message, "")
 
-    def test_string_tool_argument_keeps_json_like_payload_as_text(self) -> None:
-        """String parameters should keep JSON-looking payloads as raw text."""
+    def test_reject_invalid_action_type(self) -> None:
+        """Unsupported action_type values must raise ValueError."""
         content = """
 {
   "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call-1",
-          "name": "write_file",
-          "arguments": {
-            "path": {"$payload_ref": "path_payload"},
-            "content": {"$payload_ref": "content_payload"}
-          }
-        }
-      ]
-    }
+    "action_type": "REFLECT",
+    "output": {}
   }
 }
-<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
-"/workspace/survey-app/package.json"
-<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
-<<<PIVOT_PAYLOAD:content_payload:BEGIN_6F2D9C1A>>>
-{
-  "name": "xiangan-survey",
-  "private": true,
-  "version": "1.0.0"
-}
-<<<PIVOT_PAYLOAD:content_payload:END_6F2D9C1A>>>
 """.strip()
-        tool_manager = _StubToolManager(
-            {
-                "write_file": {
-                    "properties": {
-                        "path": {"type": "string"},
-                        "content": {"type": "string"},
-                    }
-                }
-            }
-        )
 
-        decision = parse_react_output(content, tool_manager=tool_manager)
+        with self.assertRaisesRegex(ValueError, "Unsupported action_type"):
+            parse_react_output(content)
 
-        self.assertEqual(
-            decision.action.tool_calls[0].arguments,
-            {
-                "path": "/workspace/survey-app/package.json",
-                "content": (
-                    "{\n"
-                    '  "name": "xiangan-survey",\n'
-                    '  "private": true,\n'
-                    '  "version": "1.0.0"\n'
-                    "}"
-                ),
-            },
-        )
+    def test_reject_missing_action(self) -> None:
+        """A missing action object must raise ValueError."""
+        content = """
+{
+  "message": "no action"
+}
+""".strip()
+
+        with self.assertRaisesRegex(ValueError, "Missing or invalid action object"):
+            parse_react_output(content)
+
+    def test_reject_non_object_action_output(self) -> None:
+        """action.output must be an object."""
+        content = """
+{
+  "action": {
+    "action_type": "ANSWER",
+    "output": "not-an-object"
+  }
+}
+""".strip()
+
+        with self.assertRaisesRegex(
+            ValueError, "action.output must be an object"
+        ):
+            parse_react_output(content)
+
+    def test_reject_non_object_top_level(self) -> None:
+        """Top-level payload must be a JSON object."""
+        with self.assertRaisesRegex(
+            ValueError, "must be a top-level JSON object"
+        ):
+            parse_react_output("[1, 2, 3]")
+
+    def test_safe_load_json_strips_markdown_fences(self) -> None:
+        """Markdown-fenced JSON should be unwrapped before parsing."""
+        fenced = '```json\n{"a": 1}\n```'
+
+        self.assertEqual(safe_load_json(fenced), {"a": 1})
+
+    def test_safe_load_json_rejects_invalid_json(self) -> None:
+        """Malformed JSON must raise ValueError."""
+        with self.assertRaisesRegex(ValueError, "Failed to parse JSON"):
+            safe_load_json("{not valid")
 
 
 if __name__ == "__main__":

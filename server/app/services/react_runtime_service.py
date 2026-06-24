@@ -175,6 +175,7 @@ class ReactRuntimeService:
         task: ReactTask,
         content: str,
         *,
+        reasoning_content: str | None = None,
         tool_calls: list[dict[str, Any]] | None = None,
     ) -> TaskRuntimeState:
         """Append the assistant reply to persisted runtime messages.
@@ -182,6 +183,8 @@ class ReactRuntimeService:
         Args:
             task: Task whose runtime state should be updated.
             content: Raw assistant content to append.
+            reasoning_content: Provider reasoning/thinking text to replay to
+                the LLM on subsequent recursions (chain-of-thought continuation).
             tool_calls: Native tool calls when the LLM used function calling.
 
         Returns:
@@ -189,6 +192,8 @@ class ReactRuntimeService:
         """
         state = self.load(task)
         message: dict[str, Any] = {"role": "assistant", "content": content}
+        if reasoning_content:
+            message["reasoning_content"] = reasoning_content
         if tool_calls:
             message["tool_calls"] = tool_calls
         state.messages.append(message)
@@ -724,6 +729,16 @@ class ReactRuntimeService:
             tool_calls = item.get("tool_calls")
             if isinstance(tool_calls, list) and role == "assistant":
                 message["tool_calls"] = tool_calls
+
+            # Preserve reasoning_content on assistant messages so the
+            # chain-of-thought continues across recursions.
+            reasoning_content = item.get("reasoning_content")
+            if (
+                isinstance(reasoning_content, str)
+                and reasoning_content
+                and role == "assistant"
+            ):
+                message["reasoning_content"] = reasoning_content
 
             # Preserve tool_results on user messages
             tool_results = item.get("tool_results")

@@ -16,7 +16,6 @@ import {
   MessageSquare,
   Paperclip,
   Plus,
-  RefreshCw,
   Square,
   XCircle,
   Zap,
@@ -98,7 +97,6 @@ interface ChatComposerProps {
   isContextUsageLoading: boolean;
   isCompacting?: boolean;
   supportsImageInput: boolean;
-  thinkingModes: ChatThinkingMode[];
   selectedThinkingMode: ChatThinkingMode | null;
   webSearchProviders: ChatWebSearchProviderOption[];
   selectedWebSearchProvider: string | null;
@@ -180,7 +178,6 @@ export function ChatComposer({
   isContextUsageLoading,
   isCompacting = false,
   supportsImageInput,
-  thinkingModes,
   selectedThinkingMode,
   webSearchProviders,
   selectedWebSearchProvider,
@@ -210,24 +207,15 @@ export function ChatComposer({
   );
   const hasWebSearchSelector =
     webSearchProviders.length > 0 && selectedWebSearchProvider !== null;
-  const hasThinkingSelector =
-    thinkingModes.length > 0 && selectedThinkingMode !== null;
+  const hasThinkingSelector = selectedThinkingMode !== null;
   const selectedWebSearchProviderOption =
     webSearchProviders.find(
       (provider) => provider.key === selectedWebSearchProvider,
     ) ?? null;
   const selectedThinkingModeLabel =
-    selectedThinkingMode === "thinking"
-      ? "Thinking"
-      : selectedThinkingMode === "auto"
-        ? "Auto"
-        : "Fast";
+    selectedThinkingMode === "enabled" ? "Thinking" : "Fast";
   const SelectedThinkingModeIcon =
-    selectedThinkingMode === "thinking"
-      ? Brain
-      : selectedThinkingMode === "auto"
-        ? RefreshCw
-        : Zap;
+    selectedThinkingMode === "enabled" ? Brain : Zap;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mandatorySkillItemRefs = useRef<
     Record<string, HTMLDivElement | null>
@@ -1009,30 +997,18 @@ export function ChatComposer({
                       </span>
                     </SelectTrigger>
                     <SelectContent size="medium">
-                      {thinkingModes.includes("auto") && (
-                        <SelectItem value="auto">
-                          <div className="flex items-center gap-2">
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            <span>Auto</span>
-                          </div>
-                        </SelectItem>
-                      )}
-                      {thinkingModes.includes("fast") && (
-                        <SelectItem value="fast">
-                          <div className="flex items-center gap-2">
-                            <Zap className="h-3.5 w-3.5" />
-                            <span>Fast</span>
-                          </div>
-                        </SelectItem>
-                      )}
-                      {thinkingModes.includes("thinking") && (
-                        <SelectItem value="thinking">
-                          <div className="flex items-center gap-2">
-                            <Brain className="h-3.5 w-3.5" />
-                            <span>Thinking</span>
-                          </div>
-                        </SelectItem>
-                      )}
+                      <SelectItem value="enabled">
+                        <div className="flex items-center gap-2">
+                          <Brain className="h-3.5 w-3.5" />
+                          <span>Thinking</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="disabled">
+                        <div className="flex items-center gap-2">
+                          <Zap className="h-3.5 w-3.5" />
+                          <span>Fast</span>
+                        </div>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 )}

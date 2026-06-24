@@ -66,14 +66,11 @@ class ParsedReactDecision:
 
     Attributes:
         message: User-facing progress note emitted every recursion.
-        thinking_next_turn: Hint controlling whether the next recursion should
-            use provider thinking mode when the runtime is in Auto mode.
         action: Parsed action definition.
         raw_payload: Canonical dictionary representation of the parsed response.
     """
 
     message: str
-    thinking_next_turn: bool | None
     action: ParsedAction
     raw_payload: dict[str, Any]
 

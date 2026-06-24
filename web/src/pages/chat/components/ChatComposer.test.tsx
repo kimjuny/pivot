@@ -30,7 +30,6 @@ function buildComposerProps(
     contextUsage: null,
     isContextUsageLoading: false,
     supportsImageInput: false,
-    thinkingModes: [],
     selectedThinkingMode: null,
     webSearchProviders: [],
     selectedWebSearchProvider: null,
@@ -162,8 +161,7 @@ describe("ChatComposer", () => {
             question: "Please confirm whether we should prioritize mobile.",
           },
           canSendMessage: true,
-          thinkingModes: ["auto", "fast"],
-          selectedThinkingMode: "auto",
+          selectedThinkingMode: "disabled",
           webSearchProviders: [{ key: "pivot@test", name: "Test" }],
           selectedWebSearchProvider: "pivot@test",
         })}

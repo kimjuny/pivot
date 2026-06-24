@@ -64,7 +64,7 @@ class ReactTaskLaunchRequest:
     session_id: str | None
     file_ids: list[str]
     web_search_provider: str | None = None
-    thinking_mode: Literal["auto", "fast", "thinking"] | None = None
+    thinking_enabled: bool = False
     mandatory_skill_names: list[str] | None = None
     task_id: str | None = None
 
@@ -778,13 +778,7 @@ class ReactTaskSupervisor:
                         db_session_factory=managed_session,
                     ),
                     stream_llm_responses=bool(llm_config.streaming),
-                    thinking_runtime_config={
-                        "protocol": llm_config.protocol,
-                        "thinking_policy": llm_config.thinking_policy,
-                        "thinking_effort": llm_config.thinking_effort,
-                        "thinking_budget_tokens": llm_config.thinking_budget_tokens,
-                        "thinking_mode": launch.thinking_mode,
-                    },
+                    thinking_enabled=launch.thinking_enabled,
                 )
 
                 before_start_effects = await self._run_task_hooks(

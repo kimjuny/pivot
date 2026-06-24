@@ -830,7 +830,7 @@ function ChatContainer({
     string | null
   >(null);
   const [selectedThinkingMode, setSelectedThinkingMode] =
-    useState<ChatThinkingMode | null>(null);
+    useState<ChatThinkingMode | null>("disabled");
   const [runtimeSkills, setRuntimeSkills] = useState<MandatorySkillSelection[]>(
     [],
   );
@@ -915,9 +915,6 @@ function ChatContainer({
     readyPendingFiles,
     hasUploadingFiles,
     supportsImageInput,
-    supportsThinkingSelector,
-    thinkingModes,
-    defaultThinkingMode,
     imageInputRef,
     documentInputRef,
     removePendingFile,
@@ -1033,21 +1030,12 @@ function ChatContainer({
   }, []);
 
   /**
-   * Keep the selected thinking mode aligned with the primary LLM capability set.
+   * Reset the thinking toggle to its default (disabled) whenever the primary
+   * LLM changes. Thinking is a per-task choice now — every LLM supports it.
    */
   useEffect(() => {
-    if (!supportsThinkingSelector || thinkingModes.length === 0) {
-      setSelectedThinkingMode(null);
-      return;
-    }
-
-    setSelectedThinkingMode((previous) => {
-      if (previous && thinkingModes.includes(previous)) {
-        return previous;
-      }
-      return defaultThinkingMode;
-    });
-  }, [defaultThinkingMode, supportsThinkingSelector, thinkingModes]);
+    setSelectedThinkingMode(primaryLlmId ? "disabled" : null);
+  }, [primaryLlmId]);
 
   /**
    * Cancels any pending delayed compact-status clear so the latest status wins.
@@ -3571,7 +3559,7 @@ function ChatContainer({
           session_id: activeSessionId,
           file_ids: filesToSend.map((file) => file.fileId),
           web_search_provider: selectedWebSearchProvider,
-          thinking_mode: selectedThinkingMode,
+          thinking_enabled: selectedThinkingMode === "enabled",
           mandatory_skill_names: manualCompactSkillNames,
         });
 
@@ -4610,7 +4598,6 @@ function ChatContainer({
         isContextUsageLoading={isContextUsageLoading}
         isCompacting={compactStatusMessage !== null}
         supportsImageInput={supportsImageInput}
-        thinkingModes={thinkingModes}
         selectedThinkingMode={selectedThinkingMode}
         webSearchProviders={webSearchProviders}
         selectedWebSearchProvider={selectedWebSearchProvider}

@@ -17,7 +17,6 @@ Always output a bare JSON object (no markdown fences, no comments, no trailing c
 {
   "iteration": 3,
   "message": "A note to the user about what you are doing, what you found, or what happens next. Every recursion must include this",
-  "thinking_next_turn": false,       // Set `true` only when the next recursion involves a high-cost/irreversible action or resolving a critical ambiguity. Default `false`.
   "action": {
     "action_type": "CALL_TOOL | CLARIFY | ANSWER",
     "output": {}
@@ -50,7 +49,6 @@ Example:
 {
   "iteration": 3,
   "message": "Task complete.",
-  "thinking_next_turn": false,
   "action": {
     "action_type": "ANSWER",
     "output": {
