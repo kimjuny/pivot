@@ -134,8 +134,6 @@ registerActionHandler({
           ? payload.prompt_template
           : "",
       cron: typeof payload.cron === "string" ? payload.cron : "",
-      timezone:
-        typeof payload.timezone === "string" ? payload.timezone : "UTC",
       sessionStrategy:
         payload.session_strategy === "isolate" ? "isolate" : "reuse",
     });

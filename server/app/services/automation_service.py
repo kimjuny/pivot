@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from app.models.automation import Automation, AutomationRun
 from app.models.session import Session
 from app.services.agent_service import AgentService
 from app.services.provider_registry_service import ProviderRegistryService
+from app.services.system_settings_service import SystemSettingsService
 from app.utils.logging_config import get_logger
 from croniter import croniter
 from sqlmodel import col, select
@@ -229,7 +231,7 @@ class AutomationService:
         if release_id is None:
             raise ValueError("Agent has no active release")
 
-        next_run_at = _compute_next_run(trigger_config)
+        next_run_at = _compute_next_run(trigger_config, self.db)
 
         automation = Automation(
             owner_id=owner_id,
@@ -290,6 +292,7 @@ class AutomationService:
             if automation.status == "active":
                 automation.next_run_at = _compute_next_run(
                     automation.trigger_config,
+                    self.db,
                 )
             else:
                 automation.next_run_at = None
@@ -470,7 +473,9 @@ class AutomationService:
         # scheduled time and the scheduler stops re-scanning this automation.
         automation = self.db.get(Automation, automation_id)
         if automation is not None and automation.status == "active":
-            automation.next_run_at = _compute_next_run(automation.trigger_config)
+            automation.next_run_at = _compute_next_run(
+                automation.trigger_config, self.db
+            )
             automation.updated_at = datetime.now(UTC)
             self.db.add(automation)
             self.db.commit()
@@ -498,15 +503,21 @@ class AutomationService:
         automation = self.db.get(Automation, automation_id)
         if automation is None or automation.status != "active":
             return
-        next_at = _compute_next_run(automation.trigger_config)
-        # Guard against cron expressions that still resolve to the past.
+
+        cron_expr = json.loads(automation.trigger_config)["cron"]
+        tz = _resolve_system_timezone(self.db)
         now = datetime.now(UTC)
+
+        next_at = _compute_next_run(automation.trigger_config, self.db)
+        # Guard against cron expressions that resolve to the immediate past
+        # (e.g. sub-second schedules). Advance in-zone until strictly future.
         for _ in range(100):
             if next_at > now:
                 break
-            next_at = croniter(
-                json.loads(automation.trigger_config)["cron"], next_at
-            ).get_next(datetime)
+            next_local = next_at.astimezone(tz).replace(tzinfo=None)
+            next_local = croniter(cron_expr, next_local).get_next(datetime)
+            next_at = next_local.replace(tzinfo=tz).astimezone(UTC)
+
         automation.next_run_at = next_at
         automation.updated_at = now
         self.db.add(automation)
@@ -627,7 +638,7 @@ class AutomationService:
     ) -> None:
         """Update last_run_at and compute next_run_at after a run completes."""
         automation.last_run_at = datetime.now(UTC)
-        automation.next_run_at = _compute_next_run(automation.trigger_config)
+        automation.next_run_at = _compute_next_run(automation.trigger_config, self.db)
         automation.updated_at = datetime.now(UTC)
         self.db.add(automation)
         self.db.commit()
@@ -657,8 +668,30 @@ def _validate_trigger_config(trigger_config: str) -> None:
         raise ValueError(f"Invalid cron expression: {exc}") from exc
 
 
-def _compute_next_run(trigger_config: str) -> datetime:
-    """Compute the next fire time from a trigger config JSON string."""
+def _resolve_system_timezone(db: DBSession) -> ZoneInfo:
+    """Return the configured system timezone as a ZoneInfo, UTC on failure."""
+    tz_name = SystemSettingsService(db).get_time_zone()
+    try:
+        return ZoneInfo(tz_name)
+    except (KeyError, ValueError):
+        logger.warning("Invalid system timezone %r, falling back to UTC", tz_name)
+        return ZoneInfo("UTC")
+
+
+def _compute_next_run(trigger_config: str, db: DBSession) -> datetime:
+    """Compute the next fire time (as UTC) from a trigger config JSON string.
+
+    The cron expression is interpreted in the system-configured timezone, so
+    ``0 9 * * *`` fires at 09:00 wall-clock local time regardless of where the
+    server runs. The returned datetime is in UTC for persistence.
+    """
     config = json.loads(trigger_config)
     cron_expr = config["cron"]
-    return croniter(cron_expr, datetime.now(UTC)).get_next(datetime)
+    tz = _resolve_system_timezone(db)
+
+    # croniter interprets the cron fields against the local components of the
+    # start time, so feed it the current wall-clock time in the target zone.
+    now_local = datetime.now(tz).replace(tzinfo=None)
+    next_local = croniter(cron_expr, now_local).get_next(datetime)
+    # Attach the zone and convert to UTC for storage.
+    return next_local.replace(tzinfo=tz).astimezone(UTC)

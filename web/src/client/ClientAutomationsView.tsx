@@ -65,7 +65,6 @@ function formatScheduleTime(iso: string | null): string {
 /** Derive a short human-readable label from a cron expression. */
 interface TriggerConfig {
   cron?: string;
-  timezone?: string;
 }
 
 function cronToLabel(triggerConfig: string): string {

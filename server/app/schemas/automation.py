@@ -13,7 +13,7 @@ class AutomationCreateRequest(AppBaseModel):
     agent_id: int
     prompt_template: str = Field(min_length=1)
     trigger_config: str = Field(
-        description='JSON: {"cron": "0 9 * * 1-5", "timezone": "Asia/Shanghai"}',
+        description='JSON: {"cron": "0 9 * * 1-5"}. Times use the system-configured timezone.',
     )
     session_strategy: str = Field(
         default="reuse",

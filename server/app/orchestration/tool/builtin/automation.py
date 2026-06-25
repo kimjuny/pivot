@@ -34,13 +34,10 @@ def automation(
         Param(
             "Cron expression for the schedule. "
             "Examples: '0 9 * * 1-5' (weekdays at 9), "
-            "'30 8 * * *' (daily at 8:30), '0 10 1 * *' (monthly on the 1st)."
+            "'30 8 * * *' (daily at 8:30), '0 10 1 * *' (monthly on the 1st). "
+            "Times are interpreted in the system-configured timezone."
         ),
     ],
-    timezone: Annotated[
-        str,
-        Param("IANA timezone for the schedule (e.g. 'UTC', 'Asia/Shanghai')."),
-    ] = "UTC",
     skip_confirm: Annotated[
         bool,
         Param(
@@ -64,23 +61,21 @@ def automation(
     Args:
         name: Short human-readable name.
         prompt_template: Message template with optional ``{{variables}}``.
-        schedule: Five-field cron expression.
-        timezone: IANA timezone string.
+        schedule: Five-field cron expression (system timezone).
         skip_confirm: If True, create directly without dialog.
 
     Returns:
         A dict containing the automation data and a ``pivot_action`` envelope.
     """
     if skip_confirm:
-        return _create_directly(name, prompt_template, schedule, timezone)
-    return _propose_via_dialog(name, prompt_template, schedule, timezone)
+        return _create_directly(name, prompt_template, schedule)
+    return _propose_via_dialog(name, prompt_template, schedule)
 
 
 def _create_directly(
     name: str,
     prompt_template: str,
     schedule: str,
-    timezone: str,
 ) -> dict[str, object]:
     """Create the automation directly (Channel flow)."""
     import json
@@ -130,7 +125,7 @@ def _create_directly(
             },
         }
 
-    trigger_config = json.dumps({"cron": schedule, "timezone": timezone})
+    trigger_config = json.dumps({"cron": schedule})
 
     with managed_session() as db:
         from app.services.automation_service import AutomationService
@@ -150,7 +145,6 @@ def _create_directly(
         "name": name,
         "prompt_template": prompt_template,
         "schedule": schedule,
-        "timezone": timezone,
         "session_strategy": "this_session",
         "automation_id": auto.automation_id,
         "status": auto.status,
@@ -171,14 +165,12 @@ def _propose_via_dialog(
     name: str,
     prompt_template: str,
     schedule: str,
-    timezone: str,
 ) -> dict[str, object]:
     """Return a pivot_action to open the creation dialog (Web UI flow)."""
     return {
         "name": name,
         "prompt_template": prompt_template,
         "schedule": schedule,
-        "timezone": timezone,
         "session_strategy": "reuse",
         "pivot_action": {
             "type": "propose_automation",
@@ -187,7 +179,6 @@ def _propose_via_dialog(
                 "name": name,
                 "prompt_template": prompt_template,
                 "cron": schedule,
-                "timezone": timezone,
                 "session_strategy": "reuse",
             },
         },

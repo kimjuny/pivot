@@ -52,7 +52,6 @@ export interface AutomationProposal {
   name: string;
   promptTemplate: string;
   cron: string;
-  timezone?: string;
   sessionStrategy?: "reuse" | "isolate" | "this_session";
 }
 
@@ -81,7 +80,6 @@ interface FormData {
   customCron: string;
   timeHour: string;
   timeMinute: string;
-  timezone: string;
   sessionStrategy: SessionStrategy;
   timeoutSeconds: string;
 }
@@ -95,14 +93,9 @@ function buildDefaultFormData(): FormData {
     customCron: "",
     timeHour: "9",
     timeMinute: "0",
-    timezone: getSystemTimeZone(),
     sessionStrategy: "reuse",
     timeoutSeconds: "300",
   };
-}
-
-function getSystemTimeZone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
 function buildCronExpression(data: FormData): string {
@@ -433,7 +426,7 @@ export function AutomationCreateDialog({
         await updateClientAutomation(automation.automation_id, {
           name: formData.name.trim(),
           prompt_template: formData.promptTemplate.trim(),
-          trigger_config: JSON.stringify({ cron, timezone: formData.timezone }),
+          trigger_config: JSON.stringify({ cron }),
           session_strategy: formData.sessionStrategy,
           timeout_seconds: timeoutSeconds,
         });
@@ -444,7 +437,7 @@ export function AutomationCreateDialog({
           name: formData.name.trim(),
           agent_id: Number(formData.agentId),
           prompt_template: formData.promptTemplate.trim(),
-          trigger_config: JSON.stringify({ cron, timezone: formData.timezone }),
+          trigger_config: JSON.stringify({ cron }),
           session_strategy: formData.sessionStrategy,
           timeout_seconds: timeoutSeconds,
         };
@@ -769,7 +762,6 @@ export function AutomationCreateDialog({
 function applyProposal(data: FormData, proposal: AutomationProposal): void {
   data.name = proposal.name;
   data.promptTemplate = proposal.promptTemplate;
-  data.timezone = proposal.timezone ?? getSystemTimeZone();
   data.sessionStrategy = proposal.sessionStrategy ?? "reuse";
 
   const parsed = parseCronForForm(proposal.cron);
@@ -782,7 +774,7 @@ function applyProposal(data: FormData, proposal: AutomationProposal): void {
 /** Build FormData from an existing automation for edit mode. */
 function buildEditFormData(automation: ClientAutomation): FormData {
   try {
-    const config = JSON.parse(automation.trigger_config) as { cron?: string; timezone?: string };
+    const config = JSON.parse(automation.trigger_config) as { cron?: string };
     const parsed = parseCronForForm(config.cron ?? "");
     return {
       name: automation.name,
@@ -792,7 +784,6 @@ function buildEditFormData(automation: ClientAutomation): FormData {
       customCron: parsed.customCron,
       timeHour: parsed.timeHour,
       timeMinute: parsed.timeMinute,
-      timezone: config.timezone ?? getSystemTimeZone(),
       sessionStrategy: automation.session_strategy,
       timeoutSeconds: String(automation.timeout_seconds),
     };
@@ -805,7 +796,6 @@ function buildEditFormData(automation: ClientAutomation): FormData {
       customCron: "",
       timeHour: "9",
       timeMinute: "0",
-      timezone: getSystemTimeZone(),
       sessionStrategy: automation.session_strategy,
       timeoutSeconds: String(automation.timeout_seconds),
     };

@@ -18,7 +18,7 @@ class Automation(SQLModel, table=True):
         agent_id: Published agent this automation talks to.
         release_id: Pinned release snapshot (same as client sessions).
         trigger_type: Trigger mechanism (currently only "cron").
-        trigger_config: JSON config for the trigger (e.g. cron expression, timezone).
+        trigger_config: JSON config for the trigger (cron expression; system timezone applies).
         prompt_template: Message template sent to the agent each run.
         session_strategy: "reuse" shares one session across runs; "isolate" creates a
             new session per run.
@@ -51,8 +51,8 @@ class Automation(SQLModel, table=True):
     # Trigger
     trigger_type: str = Field(default="cron", max_length=20)
     trigger_config: str = Field(
-        default='{"cron": "", "timezone": "UTC"}',
-        description='JSON: {"cron": "0 9 * * 1-5", "timezone": "Asia/Shanghai"}',
+        default='{"cron": ""}',
+        description='JSON: {"cron": "0 9 * * 1-5"}. Times are interpreted in the system-configured timezone.',
     )
 
     # Task template

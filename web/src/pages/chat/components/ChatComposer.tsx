@@ -1100,24 +1100,14 @@ export function ChatComposer({
                   usage={contextUsage}
                   isLoading={isContextUsageLoading}
                   isCompacting={isCompacting}
+                  isStreaming={isStreaming}
+                  tokensPerSecond={liveTaskTelemetry?.tokensPerSecond ?? null}
                 />
                 {isStreaming && liveTaskTelemetry?.taskStartTime ? (
                   <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
                     {taskElapsedSeconds > 0 && (
                       <span title="Task elapsed time">
                         {taskElapsedSeconds}s
-                      </span>
-                    )}
-                    {typeof liveTaskTelemetry.tokensPerSecond === "number" && (
-                      <span
-                        title={
-                          typeof liveTaskTelemetry.estimatedCompletionTokens ===
-                          "number"
-                            ? `Estimated output: ${liveTaskTelemetry.estimatedCompletionTokens.toLocaleString()} tokens`
-                            : undefined
-                        }
-                      >
-                        {liveTaskTelemetry.tokensPerSecond.toFixed(1)} tok/s
                       </span>
                     )}
                   </span>
