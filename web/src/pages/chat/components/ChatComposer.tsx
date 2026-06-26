@@ -17,6 +17,7 @@ import {
   Paperclip,
   Plus,
   Square,
+  X,
   XCircle,
   Zap,
 } from "lucide-react";
@@ -62,7 +63,10 @@ import {
 import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
-import type { ReactContextUsageSummary } from "@/utils/api";
+import type {
+  OperationRefPayload,
+  ReactContextUsageSummary,
+} from "@/utils/api";
 import { getFileIcon } from "@/utils/file-icon";
 import type { ChatThinkingMode } from "@/utils/llmThinking";
 import { useFileMention } from "@/hooks/use-file-mention";
@@ -130,6 +134,8 @@ interface ChatComposerProps {
   onImageInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onDocumentInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onRemovePendingFile: (clientId: string) => void | Promise<void>;
+  pendingActionRefs?: OperationRefPayload[];
+  onRemoveActionRef?: (refId: string) => void;
 }
 
 interface ActiveMandatorySkillMention {
@@ -164,34 +170,6 @@ function getActiveMandatorySkillMention(
     end: safeSelectionStart,
     query,
   };
-}
-
-/**
- * Tracks elapsed wall-clock seconds since a task started, ticking every
- * second while running. Powers the live task timer in the composer footer.
- */
-function useTaskElapsedSeconds(
-  startTime: string | undefined,
-  isRunning: boolean,
-): number {
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    if (!startTime || !isRunning) {
-      return;
-    }
-    const startMs = Date.parse(startTime);
-    if (!Number.isFinite(startMs)) {
-      return;
-    }
-    const tick = () =>
-      setElapsed(Math.max(0, Math.round((Date.now() - startMs) / 1000)));
-    tick();
-    const interval = window.setInterval(tick, 1000);
-    return () => window.clearInterval(interval);
-  }, [startTime, isRunning]);
-
-  return elapsed;
 }
 
 /**
@@ -239,11 +217,9 @@ export function ChatComposer({
   onImageInputChange,
   onDocumentInputChange,
   onRemovePendingFile,
+  pendingActionRefs,
+  onRemoveActionRef,
 }: ChatComposerProps) {
-  const taskElapsedSeconds = useTaskElapsedSeconds(
-    liveTaskTelemetry?.taskStartTime,
-    isStreaming,
-  );
   const isCompactMode = selectedMandatorySkills.some(
     (skill) => skill.name === "compact",
   );
@@ -710,6 +686,31 @@ export function ChatComposer({
           />
 
           <InputGroup className="h-auto rounded-none !border-0 bg-transparent !shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0">
+            {pendingActionRefs && pendingActionRefs.length > 0 && (
+              <InputGroupAddon
+                align="block-start"
+                className="gap-1 bg-muted/20 px-3 pb-1.5 pt-2"
+              >
+                {pendingActionRefs.map((ref) => (
+                  <span
+                    key={ref.refId}
+                    className="group/action-ref inline-flex items-center gap-1 rounded-md border border-border bg-background py-0.5 pl-2 pr-1 text-[11px] font-medium text-foreground/80"
+                  >
+                    {ref.operationLabel}
+                    {onRemoveActionRef && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveActionRef(ref.refId)}
+                        className="flex h-3.5 w-3.5 items-center justify-center rounded-sm text-foreground/40 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/action-ref:opacity-100"
+                        title="Remove"
+                      >
+                        <X className="h-3 w-3" strokeWidth={2.5} />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </InputGroupAddon>
+            )}
             {replyTarget && (
               <InputGroupAddon
                 align="block-start"
@@ -1103,15 +1104,6 @@ export function ChatComposer({
                   isStreaming={isStreaming}
                   tokensPerSecond={liveTaskTelemetry?.tokensPerSecond ?? null}
                 />
-                {isStreaming && liveTaskTelemetry?.taskStartTime ? (
-                  <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                    {taskElapsedSeconds > 0 && (
-                      <span title="Task elapsed time">
-                        {taskElapsedSeconds}s
-                      </span>
-                    )}
-                  </span>
-                ) : null}
                 {isStreaming && !draftMessage.trim() ? (
                   <InputGroupButton
                     type="button"

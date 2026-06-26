@@ -136,6 +136,17 @@ function StudioDashboardPage() {
   const refreshing = loading && overview !== null;
   const sectionClass = refreshing ? "section-stale" : "section-fresh";
 
+  // Initial load: take over the whole available area so the spinner is
+  // centered in the scroll viewport (below the nav), matching the Agents page.
+  if (loading && overview === null) {
+    return (
+      <CenteredLoadingIndicator
+        label="Loading dashboard..."
+        className="h-full"
+      />
+    );
+  }
+
   return (
     <ScrollArea className="h-full">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
@@ -168,12 +179,7 @@ function StudioDashboardPage() {
           </div>
         )}
 
-        {loading && overview === null ? (
-          <CenteredLoadingIndicator
-            label="Loading dashboard..."
-            className="min-h-[50vh]"
-          />
-        ) : overview ? (
+        {overview ? (
         <>
           <div
             key={`kpi-${revealToken}`}

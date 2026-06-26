@@ -54,6 +54,15 @@ class ReactChatRequest(AppBaseModel):
         default_factory=list,
         description="Ordered mandatory skill names explicitly selected by the user",
     )
+    action_refs: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Structured operation intents emitted by chat surfaces (e.g. a "
+            "canvas 'inpaint' request). Each is a dict mirroring the surface "
+            "SDK OperationRef contract; they are rendered into the user prompt "
+            "as a reference block for the agent to act on."
+        ),
+    )
 
 
 class ReactContextUsageRequest(AppBaseModel):

@@ -48,6 +48,7 @@ import {
   type FullSessionHistoryResponse,
   type ReactSessionRuntimeDebug,
   type InstalledSurfaceSessionResponse,
+  type OperationRefPayload,
   type PreviewEndpointResponse,
   type SessionListItem,
   type SessionResponse,
@@ -833,6 +834,10 @@ function ChatContainer({
   );
   const [selectedMandatorySkills, setSelectedMandatorySkills] = useState<
     MandatorySkillSelection[]
+  >([]);
+  // Surface-emitted operation intents pending in the composer until the user sends.
+  const [pendingActionRefs, setPendingActionRefs] = useState<
+    OperationRefPayload[]
   >([]);
   const [isManualCompacting, setIsManualCompacting] = useState(false);
   const [composerResetSignal, setComposerResetSignal] = useState(0);
@@ -3369,6 +3374,7 @@ function ChatContainer({
       messageOverride?: string;
       replyTaskIdOverride?: string | null;
       includeReadyAttachments?: boolean;
+      actionRefsOverride?: OperationRefPayload[];
     }) => {
       const pendingMessage = options?.messageOverride ?? draftMessageRef.current;
       const currentReplyTaskId = options?.replyTaskIdOverride ?? replyTaskId;
@@ -3558,6 +3564,10 @@ function ChatContainer({
           web_search_provider: selectedWebSearchProvider,
           thinking_enabled: selectedThinkingMode === "enabled",
           mandatory_skill_names: manualCompactSkillNames,
+          action_refs:
+            options?.actionRefsOverride && options.actionRefsOverride.length > 0
+              ? options.actionRefsOverride
+              : undefined,
         });
 
         if (!sessionStreamAbortControllerRef.current && activeSessionId) {
@@ -3885,13 +3895,25 @@ function ChatContainer({
         return;
       }
 
-      void sendMessage({ messageOverride: message });
+      // Capture pending operation refs before sending, then clear them so they
+      // are consumed by this send and do not leak into the next message.
+      const refsToSend =
+        pendingActionRefs.length > 0 ? pendingActionRefs : undefined;
+      void sendMessage({
+        messageOverride: message,
+        actionRefsOverride: refsToSend,
+      }).then(() => {
+        if (refsToSend) {
+          setPendingActionRefs([]);
+        }
+      });
     },
     [
       agentClientState,
       hasUploadingFiles,
       isCompactMode,
       isStreaming,
+      pendingActionRefs,
       readyPendingFiles.length,
       sendMessage,
       sessionType,
@@ -4626,6 +4648,12 @@ function ChatContainer({
         onImageInputChange={handleFileInputChange}
         onDocumentInputChange={handleDocumentInputChange}
         onRemovePendingFile={removePendingFile}
+        pendingActionRefs={pendingActionRefs}
+        onRemoveActionRef={(refId) => {
+          setPendingActionRefs((prev) =>
+            prev.filter((ref) => ref.refId !== refId),
+          );
+        }}
       />
     </div>
   );
@@ -4732,6 +4760,9 @@ function ChatContainer({
                 previewEndpoints={previewEndpoints}
                 activePreviewEndpoint={activePreviewEndpoint}
                 reconnectablePreviewSuggestion={reconnectablePreviewSuggestion}
+                onOperationRef={(ref) => {
+                  setPendingActionRefs((prev) => [...prev, ref]);
+                }}
               />
             </ResizablePanel>
           </ResizablePanelGroup>

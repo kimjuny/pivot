@@ -21,6 +21,30 @@ export interface PreviewEndpointResponse {
   created_at: string;
 }
 
+/**
+ * Structured operation intent emitted by a surface to the host.
+ *
+ * A surface declares an intent (e.g. "inpaint this image"); the host routes
+ * it to the chat composer for the user to review before the agent acts on it.
+ * `operation` and input `role` are open strings — only the agent runtime
+ * interprets their semantics.
+ */
+export interface OperationRefInputPayload {
+  /** Workspace-relative path of the referenced file. */
+  path: string;
+  /** Open semantic role, e.g. "reference", "mask", "subject". */
+  role: string;
+}
+
+export interface OperationRefPayload {
+  refId: string;
+  sourceSurfaceKey: string;
+  operation: string;
+  operationLabel: string;
+  inputs: OperationRefInputPayload[];
+  params?: Record<string, unknown>;
+}
+
 export interface ReconnectPreviewEndpointResponse {
   preview: PreviewEndpointResponse;
   available_previews: PreviewEndpointResponse[];

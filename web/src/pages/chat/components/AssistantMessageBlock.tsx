@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Copy,
+  ChevronRight,
   MessageCircleQuestion,
   MessagesSquare,
   Pencil,
@@ -14,7 +15,9 @@ import {
 import { toast } from "sonner";
 
 import DraggableDialog from "@/components/DraggableDialog";
+import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/use-theme";
 import { copyTextToClipboard } from "@/utils/clipboard";
 import { formatTimestamp } from "@/utils/timestamp";
@@ -76,6 +79,86 @@ function findPlanRecursionSplitIndex(
 }
 
 /**
+ * Tracks elapsed wall-clock seconds since a task started, ticking every
+ * second while running. Powers the live task timer at the top of a task.
+ */
+function useTaskElapsedSeconds(
+  startTime: string | undefined,
+  isRunning: boolean,
+): number {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!startTime || !isRunning) {
+      return;
+    }
+    const startMs = Date.parse(startTime);
+    if (!Number.isFinite(startMs)) {
+      return;
+    }
+    const tick = () =>
+      setElapsed(Math.max(0, Math.round((Date.now() - startMs) / 1000)));
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [startTime, isRunning]);
+
+  return elapsed;
+}
+
+interface TaskTimerHeaderProps {
+  /** ISO start time of the first recursion (task start). */
+  taskStartTime: string;
+  /** True while the task is actively streaming. */
+  isRunning: boolean;
+  /** Total duration once the task has settled (undefined while running). */
+  finalDurationSeconds: number | undefined;
+  /** Whether the iterations region is currently collapsed. */
+  collapsed: boolean;
+  /** Toggle the collapsed state (click handler). */
+  onToggle: () => void;
+}
+
+/**
+ * Header row at the top of a task: shows the elapsed/final duration and acts
+ * as the affordance to collapse/expand the iterations below it. The live
+ * counter ticks while running; once settled it shows the fixed final duration.
+ */
+function TaskTimerHeader({
+  taskStartTime,
+  isRunning,
+  finalDurationSeconds,
+  collapsed,
+  onToggle,
+}: TaskTimerHeaderProps) {
+  const liveSeconds = useTaskElapsedSeconds(
+    isRunning ? taskStartTime : undefined,
+    isRunning,
+  );
+  const seconds = isRunning ? liveSeconds : finalDurationSeconds ?? 0;
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="group/timer flex w-full items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-sidebar-accent/50 focus-visible:bg-sidebar-accent/50 focus-visible:outline-none"
+      aria-expanded={!collapsed}
+      title={collapsed ? "Expand iterations" : "Collapse iterations"}
+    >
+      <ChevronRight
+        className={cn(
+          "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
+          collapsed ? "rotate-0" : "rotate-90",
+        )}
+      />
+      <span className="text-xs font-semibold tabular-nums text-muted-foreground">
+        {seconds > 0 ? `${seconds}s` : "…"}
+      </span>
+    </button>
+  );
+}
+
+/**
  * Renders the assistant side of the timeline, including recursions and final answer state.
  */
 export const AssistantMessageBlock = memo(function AssistantMessageBlock({
@@ -123,6 +206,33 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
   const postPlanRecursions = planReview
     ? message.recursions?.slice(planRecursionSplit) ?? []
     : [];
+
+  // Collapse control for the iterations region. While a task runs the
+  // iterations stay visible; once it settles the iterations auto-collapse so
+  // only the timer + separator + final answer remain. The user can still
+  // toggle afterwards. A pending plan review forces the region open so the
+  // approval buttons stay reachable.
+  const hasRecursions = (message.recursions?.length ?? 0) > 0;
+  const isTaskRunning =
+    isStreaming && message.status === "running" && hasRecursions;
+  const isPlanReviewPending = Boolean(planReview && !planReview.approved);
+
+  // Collapsed only applies once the task has settled; default to open while
+  // running so the live iterations are visible.
+  const [iterationsCollapsed, setIterationsCollapsed] = useState(
+    !isTaskRunning && hasRecursions,
+  );
+  const prevRunningRef = useRef(isTaskRunning);
+  useEffect(() => {
+    // Auto-collapse exactly once: the transition running → settled.
+    if (prevRunningRef.current && !isTaskRunning) {
+      setIterationsCollapsed(true);
+    }
+    prevRunningRef.current = isTaskRunning;
+  }, [isTaskRunning]);
+
+  const iterationsEffectivelyCollapsed =
+    iterationsCollapsed && !isTaskRunning && !isPlanReviewPending;
 
   // DraggableDialog + Monaco editor for plan editing
   const [planEditOpen, setPlanEditOpen] = useState(false);
@@ -197,11 +307,99 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
 
   return (
     <div className="space-y-2">
-      {/* Pre-plan recursions (plan tool call) */}
-      {renderRecursions(prePlanRecursions, 0)}
+      {/* Task timer — click to collapse/expand the iterations below */}
+      {hasRecursions && (
+        <TaskTimerHeader
+          taskStartTime={taskStartTime}
+          isRunning={isTaskRunning}
+          finalDurationSeconds={
+            taskEndTime ? taskDurationSeconds : undefined
+          }
+          collapsed={iterationsEffectivelyCollapsed}
+          onToggle={() => setIterationsCollapsed((prev) => !prev)}
+        />
+      )}
 
-      {/* Plan Review section — persistent, visible even after approval */}
-      {planReview && (
+      {hasRecursions && <Separator />}
+
+      {/* Iterations region — collapses once the task settles */}
+      {hasRecursions && (
+        <div
+          className={cn(
+            "grid transition-[grid-template-rows] duration-200 ease-out",
+            iterationsEffectivelyCollapsed
+              ? "grid-rows-[0fr]"
+              : "grid-rows-[1fr]",
+          )}
+        >
+          <div className="overflow-hidden">
+            <div className="space-y-2">
+              {/* Pre-plan recursions (plan tool call) */}
+              {renderRecursions(prePlanRecursions, 0)}
+
+              {/* Plan Review section — persistent, visible even after approval */}
+              {planReview && (
+                <div className="rounded-lg bg-background/50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <ClipboardList className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100" />
+                      <span className="text-xs font-semibold text-foreground">
+                        PLAN REVIEW
+                      </span>
+                    </div>
+                    {isPlanReviewActive && (
+                      <div className="flex items-center gap-2">
+                        {planReviewSubmitting ? (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Spinner size={12} />
+                            <span>Processing...</span>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => onPlanReject(message.task_id!)}
+                              className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-danger/30 hover:text-danger"
+                            >
+                              Reject
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleOpenPlanEdit}
+                              className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-info/30 hover:text-info"
+                            >
+                              <Pencil className="mr-1 inline h-3 w-3" />
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onPlanApprove(message.task_id!)}
+                              className="rounded-full border border-success/30 bg-success/10 px-2.5 py-1 text-[11px] font-medium text-success transition-colors hover:bg-success/15"
+                            >
+                              Approve
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="pl-5 text-sm leading-relaxed text-foreground">
+                    {planReview.plan_text && (
+                      <MarkdownRenderer content={planReview.plan_text} />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Post-plan recursions (execution iterations) */}
+              {renderRecursions(postPlanRecursions, planRecursionSplit)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Iterations fallback when there are none: render plan review inline */}
+      {!hasRecursions && planReview && (
         <div className="rounded-lg bg-background/50 p-3">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -210,41 +408,6 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
                 PLAN REVIEW
               </span>
             </div>
-            {isPlanReviewActive && (
-              <div className="flex items-center gap-2">
-                {planReviewSubmitting ? (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Spinner size={12} />
-                    <span>Processing...</span>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => onPlanReject(message.task_id!)}
-                      className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-danger/30 hover:text-danger"
-                    >
-                      Reject
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleOpenPlanEdit}
-                      className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-info/30 hover:text-info"
-                    >
-                      <Pencil className="mr-1 inline h-3 w-3" />
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onPlanApprove(message.task_id!)}
-                      className="rounded-full border border-success/30 bg-success/10 px-2.5 py-1 text-[11px] font-medium text-success transition-colors hover:bg-success/15"
-                    >
-                      Approve
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
           </div>
           <div className="pl-5 text-sm leading-relaxed text-foreground">
             {planReview.plan_text && (
@@ -253,9 +416,6 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
           </div>
         </div>
       )}
-
-      {/* Post-plan recursions (execution iterations) */}
-      {renderRecursions(postPlanRecursions, planRecursionSplit)}
 
       {/* FINAL ANSWER / QUESTION / Skill Change Approval section */}
       <div className="group relative pb-8">

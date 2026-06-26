@@ -278,6 +278,7 @@ async def start_react_task(
                 thinking_enabled=request.thinking_enabled,
                 mandatory_skill_names=request.mandatory_skill_names,
                 task_id=request.task_id,
+                action_refs=request.action_refs,
             )
         )
     except ValueError as exc:
@@ -579,6 +580,7 @@ async def react_chat_stream(
                 thinking_enabled=request.thinking_enabled,
                 mandatory_skill_names=request.mandatory_skill_names,
                 task_id=request.task_id,
+                action_refs=request.action_refs,
             )
         )
     except ValueError as exc:

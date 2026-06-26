@@ -1,6 +1,7 @@
 import type { ChatSessionType, StudioTestSnapshotPayload } from '@/utils/agentTestSnapshot';
 import { apiRequest } from './core';
 import type { ChatFileAsset, TaskAttachmentAsset } from './sessions';
+import type { OperationRefPayload } from './surfaces';
 
 export interface RecursionDetail {
   iteration: number;
@@ -172,6 +173,7 @@ export const startReactTask = async (payload: {
   web_search_provider?: string | null;
   thinking_enabled?: boolean;
   mandatory_skill_names?: string[];
+  action_refs?: OperationRefPayload[];
 }): Promise<ReactTaskStartResponse> => {
   return apiRequest('/react/tasks', {
     method: 'POST',

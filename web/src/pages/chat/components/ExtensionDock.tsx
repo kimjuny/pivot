@@ -4,6 +4,7 @@ import { useTheme } from "@/lib/use-theme";
 import {
   type DevSurfaceSessionResponse,
   type InstalledSurfaceSessionResponse,
+  type OperationRefPayload,
   type PreviewEndpointResponse,
 } from "@/utils/api";
 
@@ -43,6 +44,8 @@ interface ExtensionDockProps {
   activePreviewEndpoint: PreviewEndpointResponse | null;
   /** Historical reconnectable preview recipe suggested for the current surface. */
   reconnectablePreviewSuggestion: PreviewEndpointResponse | null;
+  /** Called when a surface emits a structured operation intent for the host. */
+  onOperationRef?: (ref: OperationRefPayload) => void;
 }
 
 /**
@@ -58,6 +61,7 @@ export function ExtensionDock({
   previewEndpoints,
   activePreviewEndpoint,
   reconnectablePreviewSuggestion,
+  onOperationRef,
 }: ExtensionDockProps) {
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const runtimeThemeRef = useRef<{
@@ -227,6 +231,14 @@ export function ExtensionDock({
         postThemeChanged();
         postPreviewChanged();
         postPreviewRegistryChanged();
+        return;
+      }
+
+      if (message.type === "pivot.surface.operation_ref" && onOperationRef) {
+        const payload = message.payload;
+        if (payload && typeof payload === "object") {
+          onOperationRef(payload as OperationRefPayload);
+        }
       }
     };
 
@@ -236,6 +248,7 @@ export function ExtensionDock({
     };
   }, [
     onOpenChange,
+    onOperationRef,
     postPreviewChanged,
     postPreviewRegistryChanged,
     postThemeChanged,

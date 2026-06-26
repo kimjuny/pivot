@@ -67,6 +67,58 @@ class ReactTaskLaunchRequest:
     thinking_enabled: bool = False
     mandatory_skill_names: list[str] | None = None
     task_id: str | None = None
+    action_refs: list[dict[str, Any]] | None = None
+
+
+def render_action_refs_block(action_refs: list[dict[str, Any]] | None) -> str:
+    """Render surface-emitted operation intents into an LLM-facing text block.
+
+    The block is prepended to the user message so the agent sees the structured
+    references alongside the free-text instruction. The agent interprets the
+    ``operation`` and input ``role`` strings at runtime (e.g. an "inpaint"
+    operation with a "reference" + "mask" input maps to an inpaint tool).
+    """
+    if not action_refs:
+        return ""
+
+    lines: list[str] = [
+        "[The following structured operation references were "
+        "provided by the user via a chat surface. Act on them "
+        "using the appropriate tools.]"
+    ]
+    for ref in action_refs:
+        if not isinstance(ref, dict):
+            continue
+        operation = ref.get("operation") or "operation"
+        label = ref.get("operationLabel") or operation
+        raw_inputs = ref.get("inputs")
+        inputs: list[Any] = raw_inputs if isinstance(raw_inputs, list) else []
+        input_descs = [
+            f'{{path: "{i.get("path")}", role: "{i.get("role")}"}}'
+            for i in inputs
+            if isinstance(i, dict) and i.get("path")
+        ]
+        raw_params = ref.get("params")
+        params = raw_params if isinstance(raw_params, dict) else {}
+        parts = [f'operation: "{operation}" (label: "{label}")']
+        if input_descs:
+            parts.append(f"inputs: [{', '.join(input_descs)}]")
+        if params:
+            parts.append(f"params: {json.dumps(params, ensure_ascii=False)}")
+        lines.append("- " + "; ".join(parts))
+    lines.append(
+        "[End of operation references. Use the paths above verbatim when "
+        "calling tools; they are workspace-relative.]"
+    )
+    return "\n".join(lines)
+
+
+def prepend_action_refs(message: str, action_refs: list[dict[str, Any]] | None) -> str:
+    """Prepend a rendered action-refs block to the user message, if any."""
+    block = render_action_refs_block(action_refs)
+    if not block:
+        return message
+    return f"{block}\n\n{message}" if message else block
 
 
 @dataclass(slots=True)
@@ -481,13 +533,14 @@ class ReactTaskSupervisor:
                 raise ValueError("message is required when starting a new text turn")
             self._ensure_workspace_available_for_launch(db=db, session=session)
             launch_timestamp = datetime.now(UTC)
+            effective_message = prepend_action_refs(launch.message, launch.action_refs)
             task = ReactTask(
                 task_id=str(uuid.uuid4()),
                 session_id=launch.session_id,
                 agent_id=launch.agent_id,
                 user_id=launch.user_id,
-                user_message=launch.message,
-                user_intent=launch.message,
+                user_message=effective_message,
+                user_intent=effective_message,
                 mandatory_skill_names_json=(
                     json.dumps(normalized_mandatory_skill_names, ensure_ascii=False)
                     if normalized_mandatory_skill_names

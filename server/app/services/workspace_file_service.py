@@ -227,14 +227,21 @@ class LocalDirectoryFileService:
         root_path: Path,
         path: str,
     ) -> None:
-        """Create one directory inside a local directory root."""
+        """Create one directory inside a local directory root.
+
+        Idempotent: if the path already exists as a directory, this succeeds
+        silently (matches ``mkdir --parents`` intuition). It only raises when
+        the path is occupied by a file, since that is a genuine conflict.
+        """
         target_path = self.resolve_path(
             root_path=root_path,
             relative_path=path,
             allow_root=False,
         )
         if target_path.exists():
-            raise WorkspaceFileValidationError("Path already exists.")
+            if not target_path.is_dir():
+                raise WorkspaceFileValidationError("Path already exists as a file.")
+            return
         target_path.mkdir(parents=True)
 
     def delete_path(
@@ -539,7 +546,11 @@ class WorkspaceFileService:
         user_id: int,
         path: str,
     ) -> None:
-        """Create one directory inside an editable workspace."""
+        """Create one directory inside an editable workspace.
+
+        Idempotent: if the path already exists as a directory, this succeeds
+        silently. It only raises when the path is occupied by a file.
+        """
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
             user_id=user_id,
@@ -551,7 +562,11 @@ class WorkspaceFileService:
             allow_root=False,
         )
         if target_path.exists():
-            raise WorkspaceFileValidationError("Workspace path already exists.")
+            if not target_path.is_dir():
+                raise WorkspaceFileValidationError(
+                    "Workspace path already exists as a file."
+                )
+            return
         target_path.mkdir(parents=True)
 
     def delete_path(

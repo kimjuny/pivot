@@ -10,7 +10,7 @@ from pydantic import Field, field_validator
 
 FieldType = Literal["text", "number", "secret", "textarea", "boolean"]
 MediaType = Literal["image", "video"]
-MediaInputRole = Literal["first_frame", "last_frame", "reference"]
+MediaInputRole = Literal["first_frame", "last_frame", "reference", "mask"]
 MediaProviderJobStatus = Literal["pending", "running", "succeeded", "failed"]
 
 
