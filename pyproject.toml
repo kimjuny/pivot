@@ -8,7 +8,7 @@ readme = "README.md"
 packages = [{include = "server"}]
 
 [tool.poetry.dependencies]
-# Target Python 3.11 so the backend can use Docling and the Pydantic v2 stack.
+# Target Python 3.11 to match the Pydantic v2 stack.
 python = "^3.11"
 fastapi = "^0.115.12"
 uvicorn = "^0.34.0"
@@ -25,7 +25,11 @@ podman = "^5.4.0"
 pillow = "^11.2.1"
 pydantic = "^2.12.5"
 pydantic-settings = "^2.13.1"
-docling = "^2.77.0"
+# Lightweight per-format document parsers (replace the heavy docling/torch stack).
+pypdfium2 = "^5.6.0"
+python-docx = "^1.2.0"
+python-pptx = "^1.0.2"
+openpyxl = "^3.1.5"
 websockets = "^15.0.1"
 croniter = "^3.0.0"
 

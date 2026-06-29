@@ -5,6 +5,7 @@ import {
   CircleOff,
   CirclePause,
   CirclePlay,
+  Loader2,
   Pause,
   Play,
   Plus,
@@ -138,6 +139,7 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
     isOpen: boolean;
     automation: ClientAutomation | null;
   }>({ isOpen: false, automation: null });
+  const [triggeringId, setTriggeringId] = useState<number | null>(null);
 
   const fetchAutomations = useCallback(async () => {
     try {
@@ -209,6 +211,7 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
   };
 
   const handleTrigger = async (automation: ClientAutomation) => {
+    setTriggeringId(automation.id);
     try {
       await triggerClientAutomation(automation.automation_id);
       toast.success("Automation triggered");
@@ -217,6 +220,8 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
       toast.error(
         err instanceof Error ? err.message : "Failed to trigger automation",
       );
+    } finally {
+      setTriggeringId(null);
     }
   };
 
@@ -283,7 +288,7 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
           </Empty>
         ) : (
           <>
-            <Table>
+            <Table containerClassName="overflow-visible">
               <TableBody>
                 {pagedAutomations.map((automation, index) => {
                   const StatusIcon =
@@ -339,6 +344,7 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
                               variant="ghost"
                               size="icon"
                               className="size-7"
+                              title={automation.status === "active" ? "Pause" : "Resume"}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void handlePauseResume(automation);
@@ -354,17 +360,24 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
                               variant="ghost"
                               size="icon"
                               className="size-7"
+                              title="Run now"
+                              disabled={triggeringId === automation.id}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void handleTrigger(automation);
                               }}
                             >
-                              <CirclePlay className="size-3.5" />
+                              {triggeringId === automation.id ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <CirclePlay className="size-3.5" />
+                              )}
                             </Button>
                             <Button
                               variant="ghost"
                               size="icon"
                               className="size-7 text-destructive hover:text-destructive"
+                              title="Delete"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setDeleteConfirmation({ isOpen: true, automation });

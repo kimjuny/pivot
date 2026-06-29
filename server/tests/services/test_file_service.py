@@ -190,11 +190,11 @@ class FileServiceTestCase(unittest.TestCase):
 
     def test_store_and_preprocess_document(self) -> None:
         """Document uploads should persist extracted markdown as object data."""
-        original_converter = self.service._convert_document_with_docling
+        original_converter = self.service._convert_document_to_markdown
         original_probe = self.service._probe_pdf_text_layer
 
         def fake_convert_document(_path: Path) -> tuple[str, int | None]:
-            return "# Spec\n\nHello from docling.", 3
+            return "# Spec\n\nHello from converter.", 3
 
         def fake_probe(_path: Path):
             return PdfTextLayerProbe(
@@ -205,12 +205,12 @@ class FileServiceTestCase(unittest.TestCase):
                 printable_ratio=0.95,
             )
 
-        self.service._convert_document_with_docling = fake_convert_document
+        self.service._convert_document_to_markdown = fake_convert_document
         self.service._probe_pdf_text_layer = fake_probe
         self.addCleanup(
             setattr,
             self.service,
-            "_convert_document_with_docling",
+            "_convert_document_to_markdown",
             original_converter,
         )
         self.addCleanup(
@@ -238,7 +238,7 @@ class FileServiceTestCase(unittest.TestCase):
         markdown_bytes = self.service._object_storage().get_bytes(
             asset.markdown_object_key or ""
         )
-        self.assertIn("Hello from docling.", markdown_bytes.decode("utf-8"))
+        self.assertIn("Hello from converter.", markdown_bytes.decode("utf-8"))
 
         attached = self.service.attach_files_to_task(
             [asset.file_id],
@@ -251,12 +251,12 @@ class FileServiceTestCase(unittest.TestCase):
         self.assertEqual(len(prepared[0].content_blocks), 1)
         self.assertEqual(prepared[0].content_blocks[0]["type"], "text")
         self.assertIn("Attached document", prepared[0].content_blocks[0]["text"])
-        self.assertIn("Hello from docling.", prepared[0].content_blocks[0]["text"])
+        self.assertIn("Hello from converter.", prepared[0].content_blocks[0]["text"])
 
     def test_pdf_probe_flags_ocr_dependent_documents(self) -> None:
         """OCR-only PDFs should be rejected before Docling conversion starts."""
         original_probe = self.service._probe_pdf_text_layer
-        original_converter = self.service._convert_document_with_docling
+        original_converter = self.service._convert_document_to_markdown
 
         def fake_probe(_path: Path):
             return PdfTextLayerProbe(
@@ -268,15 +268,15 @@ class FileServiceTestCase(unittest.TestCase):
             )
 
         def fail_convert(_path: Path) -> tuple[str, int | None]:
-            raise AssertionError("Docling conversion should not run for OCR-only PDFs")
+            raise AssertionError("Conversion should not run for OCR-only PDFs")
 
         self.service._probe_pdf_text_layer = fake_probe
-        self.service._convert_document_with_docling = fail_convert
+        self.service._convert_document_to_markdown = fail_convert
         self.addCleanup(setattr, self.service, "_probe_pdf_text_layer", original_probe)
         self.addCleanup(
             setattr,
             self.service,
-            "_convert_document_with_docling",
+            "_convert_document_to_markdown",
             original_converter,
         )
 
@@ -289,9 +289,9 @@ class FileServiceTestCase(unittest.TestCase):
             )
 
     def test_pdf_probe_accepts_text_based_documents(self) -> None:
-        """Text PDFs should continue through the normal Docling conversion flow."""
+        """Text PDFs should continue through the normal document conversion flow."""
         original_probe = self.service._probe_pdf_text_layer
-        original_converter = self.service._convert_document_with_docling
+        original_converter = self.service._convert_document_to_markdown
 
         def fake_probe(_path: Path):
             return PdfTextLayerProbe(
@@ -306,12 +306,12 @@ class FileServiceTestCase(unittest.TestCase):
             return "Hello from text PDF.", 2
 
         self.service._probe_pdf_text_layer = fake_probe
-        self.service._convert_document_with_docling = fake_convert
+        self.service._convert_document_to_markdown = fake_convert
         self.addCleanup(setattr, self.service, "_probe_pdf_text_layer", original_probe)
         self.addCleanup(
             setattr,
             self.service,
-            "_convert_document_with_docling",
+            "_convert_document_to_markdown",
             original_converter,
         )
 

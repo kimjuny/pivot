@@ -84,7 +84,7 @@ class VerifiedImageUpload:
 
 @dataclass(frozen=True, slots=True)
 class VerifiedDocumentUpload:
-    """Validated document metadata derived from Docling inspection."""
+    """Validated document metadata derived from native per-format inspection."""
 
     file_bytes: bytes
     format: str
@@ -348,7 +348,7 @@ class FileService:
         try:
             if extension == "pdf":
                 self._ensure_pdf_has_embedded_text_layer(temp_path)
-            markdown_text, page_count = self._convert_document_with_docling(temp_path)
+            markdown_text, page_count = self._convert_document_to_markdown(temp_path)
         finally:
             temp_path.unlink(missing_ok=True)
 
@@ -810,7 +810,7 @@ class FileService:
         if not file_asset.object_key:
             raise ValueError("File asset does not have an object key.")
 
-        markdown_text, page_count = self._convert_document_bytes_with_docling(
+        markdown_text, page_count = self._convert_document_bytes_to_markdown(
             filename=file_asset.stored_name,
             file_bytes=self._read_object_bytes(file_asset),
         )
@@ -838,7 +838,7 @@ class FileService:
         self.db.refresh(file_asset)
         return markdown_text
 
-    def _convert_document_bytes_with_docling(
+    def _convert_document_bytes_to_markdown(
         self,
         *,
         filename: str,
@@ -846,9 +846,9 @@ class FileService:
     ) -> tuple[str, int | None]:
         """Convert one document payload to markdown using a temporary file.
 
-        Why: Docling still expects a real file path, so the server keeps the
-        spill file short-lived and under process control instead of relying on a
-        long-lived materialization cache.
+        Why: The native extractors expect a real file path, so the server keeps
+        the spill file short-lived and under process control instead of relying
+        on a long-lived materialization cache.
         """
         extension = self._extract_extension(filename)
         with tempfile.NamedTemporaryFile(
@@ -859,58 +859,153 @@ class FileService:
             handle.write(file_bytes)
 
         try:
-            return self._convert_document_with_docling(temp_path)
+            return self._convert_document_to_markdown(temp_path)
         finally:
             temp_path.unlink(missing_ok=True)
 
-    def _convert_document_with_docling(
+    def _convert_document_to_markdown(
         self,
         file_path: Path,
     ) -> tuple[str, int | None]:
-        """Convert a supported document to markdown via Docling."""
-        converter = self._build_docling_converter()
-        try:
-            conversion_result = converter.convert(file_path)
-        except Exception as err:
-            raise ValueError(
-                "Uploaded file could not be understood by Docling."
-            ) from err
+        """Convert a supported document to markdown via a native per-format extractor.
 
-        document = getattr(conversion_result, "document", None)
-        if document is None:
-            raise ValueError("Docling conversion returned no document output.")
-
-        export_to_markdown = getattr(document, "export_to_markdown", None)
-        if not callable(export_to_markdown):
-            raise ValueError(
-                "Docling document output does not support markdown export."
-            )
-
-        markdown_text = export_to_markdown()
-        if not isinstance(markdown_text, str):
-            markdown_text = str(markdown_text)
-        return markdown_text, self._extract_page_count(conversion_result, document)
+        Each branch uses a lightweight pure-Python library instead of a heavy ML
+        layout/OCR stack. Scanned/OCR-only PDFs are already rejected upstream by
+        ``_ensure_pdf_has_embedded_text_layer``, so every accepted PDF carries a
+        real text layer these extractors can read.
+        """
+        extension = self._extract_extension(file_path.name)
+        if extension == "pdf":
+            return self._extract_pdf_text(file_path)
+        if extension == "docx":
+            return self._extract_docx_text(file_path)
+        if extension == "pptx":
+            return self._extract_pptx_text(file_path)
+        if extension == "xlsx":
+            return self._extract_xlsx_text(file_path)
+        if extension in {"md", "markdown"}:
+            return file_path.read_text(encoding="utf-8", errors="replace"), None
+        raise ValueError(f"Unsupported document extension: .{extension}")
 
     @staticmethod
-    def _build_docling_converter() -> Any:
-        """Create a Docling converter for supported non-OCR document extraction."""
+    def _extract_pdf_text(file_path: Path) -> tuple[str, int | None]:
+        """Extract text from a text-based PDF via pypdfium2, page by page."""
+        pdf_document_cls = getattr(import_module("pypdfium2"), "PdfDocument", None)
+        if pdf_document_cls is None:
+            raise ValueError("pypdfium2 is installed but PdfDocument is missing.")
         try:
-            document_converter_module = import_module("docling.document_converter")
-        except ModuleNotFoundError as err:
-            raise ValueError(
-                "Docling is not available in the current backend environment. "
-                "This project still runs on Python 3.10 and Pydantic v1, while "
-                "Docling requires Python 3.11 and Pydantic v2."
-            ) from err
+            pdf_document = pdf_document_cls(str(file_path))
+        except Exception as err:
+            raise ValueError("Uploaded PDF could not be parsed.") from err
 
-        document_converter_cls = getattr(
-            document_converter_module,
-            "DocumentConverter",
-            None,
-        )
-        if document_converter_cls is None:
-            raise ValueError("Docling is installed but DocumentConverter is missing.")
-        return document_converter_cls()
+        page_count = len(pdf_document)
+        parts: list[str] = []
+        try:
+            for page_index in range(page_count):
+                page = pdf_document[page_index]
+                text_page: Any = None
+                try:
+                    text_page = page.get_textpage()
+                    char_count = int(text_page.count_chars())
+                    if char_count > 0:
+                        text = text_page.get_text_range()
+                        if not isinstance(text, str):
+                            text = str(text)
+                        parts.append(text)
+                finally:
+                    close_text_page = getattr(text_page, "close", None)
+                    if callable(close_text_page):
+                        close_text_page()
+                    close_page = getattr(page, "close", None)
+                    if callable(close_page):
+                        close_page()
+        finally:
+            close_document = getattr(pdf_document, "close", None)
+            if callable(close_document):
+                close_document()
+
+        return "\n\n".join(parts).strip(), page_count
+
+    @staticmethod
+    def _extract_docx_text(file_path: Path) -> tuple[str, int | None]:
+        """Extract paragraphs and tables from a DOCX via python-docx."""
+        document_cls = getattr(import_module("docx"), "Document", None)
+        if document_cls is None:
+            raise ValueError("python-docx is installed but Document is missing.")
+        document = document_cls(str(file_path))
+        parts: list[str] = [
+            paragraph.text
+            for paragraph in document.paragraphs
+            if paragraph.text and paragraph.text.strip()
+        ]
+        for table in document.tables:
+            rows: list[list[str]] = [
+                [cell.text.strip() for cell in row.cells] for row in table.rows
+            ]
+            parts.append(FileService._rows_to_markdown_table(rows))
+        return "\n\n".join(part for part in parts if part).strip(), None
+
+    @staticmethod
+    def _extract_pptx_text(file_path: Path) -> tuple[str, int | None]:
+        """Extract text from each slide of a PPTX via python-pptx."""
+        presentation_cls = getattr(import_module("pptx"), "Presentation", None)
+        if presentation_cls is None:
+            raise ValueError("python-pptx is installed but Presentation is missing.")
+        presentation = presentation_cls(str(file_path))
+        slides = list(presentation.slides)
+        parts: list[str] = []
+        for number, slide in enumerate(slides, start=1):
+            chunks: list[str] = []
+            for shape in slide.shapes:
+                text_frame = getattr(shape, "text_frame", None)
+                text = getattr(text_frame, "text", None)
+                if text and text.strip():
+                    chunks.append(text.strip())
+            if chunks:
+                parts.append(f"## Slide {number}\n\n" + "\n\n".join(chunks))
+        return "\n\n".join(parts).strip(), len(slides)
+
+    @staticmethod
+    def _extract_xlsx_text(file_path: Path) -> tuple[str, int | None]:
+        """Extract each worksheet of an XLSX as a markdown table via openpyxl."""
+        load_workbook = getattr(import_module("openpyxl"), "load_workbook", None)
+        if load_workbook is None:
+            raise ValueError("openpyxl is installed but load_workbook is missing.")
+        workbook = load_workbook(str(file_path), read_only=True, data_only=True)
+        parts: list[str] = []
+        try:
+            for sheet in workbook.worksheets:
+                rows: list[list[str]] = [
+                    ["" if cell is None else str(cell) for cell in row]
+                    for row in sheet.iter_rows(values_only=True)
+                ]
+                rows = [row for row in rows if any(cell.strip() for cell in row)]
+                if rows:
+                    parts.append(
+                        f"### {sheet.title}\n\n"
+                        + FileService._rows_to_markdown_table(rows)
+                    )
+        finally:
+            close_workbook = getattr(workbook, "close", None)
+            if callable(close_workbook):
+                close_workbook()
+
+        return "\n\n".join(parts).strip(), None
+
+    @staticmethod
+    def _rows_to_markdown_table(rows: list[list[str]]) -> str:
+        """Render a list of cell rows as a GitHub-flavored markdown table."""
+        width = max(len(row) for row in rows)
+        normalized = [row + [""] * (width - len(row)) for row in rows]
+        header = normalized[0]
+        separator = ["---"] * width
+        body = normalized[1:]
+        lines = [
+            "| " + " | ".join(header) + " |",
+            "| " + " | ".join(separator) + " |",
+            *("| " + " | ".join(row) + " |" for row in body),
+        ]
+        return "\n".join(lines)
 
     def _ensure_pdf_has_embedded_text_layer(self, file_path: Path) -> None:
         """Reject PDFs that appear to depend on OCR before slow parsing starts.
@@ -1011,31 +1106,6 @@ class FileService:
             non_empty_pages=non_empty_pages,
             printable_ratio=printable_ratio,
         )
-
-    @staticmethod
-    def _extract_page_count(
-        conversion_result: Any,
-        document: Any,
-    ) -> int | None:
-        """Extract page count from Docling objects without assuming one schema."""
-        for attr_name in ("page_count", "num_pages"):
-            candidate = getattr(conversion_result, attr_name, None)
-            if isinstance(candidate, int):
-                return candidate
-
-        result_pages = getattr(conversion_result, "pages", None)
-        if isinstance(result_pages, list | tuple | dict):
-            return len(result_pages)
-
-        for attr_name in ("page_count", "num_pages"):
-            candidate = getattr(document, attr_name, None)
-            if isinstance(candidate, int):
-                return candidate
-
-        document_pages = getattr(document, "pages", None)
-        if isinstance(document_pages, list | tuple | dict):
-            return len(document_pages)
-        return None
 
     @staticmethod
     def _extract_extension(filename: str) -> str:

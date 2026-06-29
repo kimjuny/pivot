@@ -1,0 +1,29 @@
+# =============================================================================
+# Pivot — Cloud Deploy Overrides (Linux host)
+# Applied on top of compose.yaml:
+#   podman compose -f compose.yaml -f compose.deploy.yaml up -d --build
+#
+# What this changes vs the default dev compose:
+#   - restart: unless-stopped on every runtime service (belt-and-suspenders
+#     alongside the systemd unit that owns the whole stack).
+#   - Shrinks the warm sandbox pool for a 7 GB host so on-demand agent
+#     sandboxes cannot OOM the box (default pool=8 × 1g would exceed RAM).
+# =============================================================================
+
+services:
+  backend:
+    restart: unless-stopped
+
+  frontend:
+    restart: unless-stopped
+
+  sandbox-manager:
+    restart: unless-stopped
+    environment:
+      # 7 GB host: keep at most 2 warm sandboxes, each capped at 768 MB.
+      # Idle sandboxes are still reaped after SANDBOX_POOL_IDLE_TTL_SECONDS.
+      - SANDBOX_POOL_MAX_SIZE=2
+      - SANDBOX_MEMORY_LIMIT=768m
+
+  sandbox-base:
+    restart: "no"

@@ -175,6 +175,16 @@ function getActiveMandatorySkillMention(
 /**
  * Owns the composer UI while receiving all state from the container to keep behavior explicit.
  */
+/**
+ * Direction-2 "panel bridge" trial flag. When a canvas action-ref (inpaint /
+ * outpaint intent) arrives at the composer, we glow the composer card and —
+ * when this is true — also steal focus into the textarea so the user can type
+ * the instruction right away. Focus-stealing suits "edit-then-send" but is
+ * disruptive when batch-editing many images in the canvas; flip to false to
+ * glow only. Tuning knob for the arrival effect below.
+ */
+const FOCUS_ON_ACTION_REF_ARRIVAL = true;
+
 export function ChatComposer({
   sessionId,
   inputMessage,
@@ -421,6 +431,49 @@ export function ChatComposer({
     }
   }, [focusSignal]);
 
+  // ── Direction-2 "panel bridge" ────────────────────────────────────────────
+  // A canvas action-ref arrives as a silent append to pendingActionRefs (shown
+  // as a small chip up top). Detect the NEW arrival, glow the composer card to
+  // pull the user's eye over from the canvas panel, and (when the flag is set)
+  // focus the textarea so the next step — typing the instruction — is already
+  // in hand. State lives next to the effect so the whole trial is one removable
+  // block.
+  const seenActionRefIdsRef = useRef<Set<string>>(new Set());
+  const [actionRefGlow, setActionRefGlow] = useState(false);
+  const actionRefGlowTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const refs = pendingActionRefs ?? [];
+    const seen = seenActionRefIdsRef.current;
+    const hasNewArrival = refs.some((ref) => !seen.has(ref.refId));
+    if (!hasNewArrival) {
+      return;
+    }
+    // Re-seed from the current list so removed refs don't accumulate and the
+    // freshly arrived id is now considered seen (no re-glow on re-render).
+    seenActionRefIdsRef.current = new Set(refs.map((ref) => ref.refId));
+
+    setActionRefGlow(true);
+    if (actionRefGlowTimerRef.current !== null) {
+      window.clearTimeout(actionRefGlowTimerRef.current);
+    }
+    actionRefGlowTimerRef.current = window.setTimeout(() => {
+      setActionRefGlow(false);
+      actionRefGlowTimerRef.current = null;
+    }, 1600);
+
+    if (!FOCUS_ON_ACTION_REF_ARRIVAL) {
+      return;
+    }
+    const focusFrameId = window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (textarea && !textarea.disabled) {
+        textarea.focus();
+      }
+    });
+    return () => window.cancelAnimationFrame(focusFrameId);
+  }, [pendingActionRefs]);
+
   /**
    * Keep the composer height aligned with the current draft so the reply and
    * action rows can stay visually attached instead of trapping the user in a
@@ -659,6 +712,14 @@ export function ChatComposer({
 
         <form
           onSubmit={handleFormSubmit}
+          style={
+            actionRefGlow
+              ? {
+                  boxShadow:
+                    "0 0 0 2px hsl(var(--ring) / 0.7), 0 10px 34px -8px hsl(var(--ring) / 0.45)",
+                }
+              : undefined
+          }
           className={`relative overflow-hidden rounded-2xl border bg-background shadow-lg transition-all focus-within:border-ring ${
             taskPlan ? "-mt-px rounded-t-[12px]" : ""
           }`}
@@ -694,17 +755,18 @@ export function ChatComposer({
                 {pendingActionRefs.map((ref) => (
                   <span
                     key={ref.refId}
-                    className="group/action-ref inline-flex items-center gap-1 rounded-md border border-border bg-background py-0.5 pl-2 pr-1 text-[11px] font-medium text-foreground/80"
+                    className="group/action-ref relative inline-flex animate-in fade-in slide-in-from-bottom-1 duration-300 items-center rounded-md border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-foreground/80"
                   >
                     {ref.operationLabel}
                     {onRemoveActionRef && (
                       <button
                         type="button"
                         onClick={() => onRemoveActionRef(ref.refId)}
-                        className="flex h-3.5 w-3.5 items-center justify-center rounded-sm text-foreground/40 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/action-ref:opacity-100"
+                        className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-border bg-background text-foreground/60 opacity-0 transition-opacity hover:border-destructive/40 hover:bg-destructive hover:text-white group-hover/action-ref:opacity-100"
                         title="Remove"
+                        aria-label={`Remove ${ref.operationLabel}`}
                       >
-                        <X className="h-3 w-3" strokeWidth={2.5} />
+                        <X className="h-2.5 w-2.5" strokeWidth={2.5} />
                       </button>
                     )}
                   </span>
@@ -967,7 +1029,13 @@ export function ChatComposer({
                 aria-hidden="true"
               >
                 <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-                  Ask anything,<Kbd>Shift</Kbd>+<Kbd>Enter</Kbd>for new line.
+                  {pendingActionRefs && pendingActionRefs.length > 0 ? (
+                    "Describe the change, then send…"
+                  ) : (
+                    <>
+                      Ask anything,<Kbd>Shift</Kbd>+<Kbd>Enter</Kbd>for new line.
+                    </>
+                  )}
                 </p>
               </div>
             )}

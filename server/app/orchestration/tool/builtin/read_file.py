@@ -264,7 +264,7 @@ def _read_text_in_sandbox(
 
 
 def _read_document(path: str) -> dict[str, object]:
-    """Read a document file using just-in-time Docling conversion."""
+    """Read a document file using just-in-time markdown conversion (cached)."""
     from app.services.file_service import FileService
 
     ctx = get_current_tool_execution_context()
@@ -361,7 +361,7 @@ def _read_image(path: str) -> dict[str, object]:
     description=(
         "Read a file under /workspace. Auto-selects reading strategy by extension: "
         "text/code files (and any unknown extension) get raw text output by default, "
-        "documents (pdf/docx/pptx/xlsx) get Docling-converted markdown, "
+        "documents (pdf/docx/pptx/xlsx) get converted to markdown, "
         "images (png/jpg/jpeg/webp) are made visible to the model. "
         "IMPORTANT: Always prefer read_file over bash tools (cat, head, tail, etc.) "
         "for reading files. Only fall back to bash if read_file explicitly reports "
@@ -396,8 +396,8 @@ def read_file(
 
     - **Text/code files** (.py, .js, .json, .yaml, .md, .csv, .txt, etc.) and
       any unknown extension: Returns raw content with pagination hints.
-    - **Documents** (.pdf, .docx, .pptx, .xlsx): Returns Docling-converted
-      markdown content.
+    - **Documents** (.pdf, .docx, .pptx, .xlsx): Returns markdown content
+      extracted by a lightweight per-format parser.
     - **Images** (.png, .jpg, .jpeg, .webp): Makes the image visible to the
       model in the next iteration.
 

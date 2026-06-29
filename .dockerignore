@@ -6,10 +6,16 @@
 # Build artifacts
 web/dist/
 web/build/
+web/dist-desktop/
+desktop/src-tauri/target/
 
 # Databases
 *.db
 *.sqlite*
+
+# Runtime data (regenerated / owned by the running container)
+server/data/
+server/workspace/
 
 # Editor / IDE
 **/.vscode/
