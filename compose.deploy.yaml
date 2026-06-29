@@ -18,8 +18,9 @@ services:
     restart: unless-stopped
     environment:
       # Public hostname the Vite dev server must accept (DNS-rebinding guard).
-      # Dev (compose.yaml) leaves this unset → localhost-only default.
-      - VITE_ALLOWED_HOSTS=agent.bungieai.com
+      # Set PIVOT_PUBLIC_HOST in the deploy host's (gitignored) .env file.
+      # Dev (compose.yaml) leaves it unset → localhost-only default.
+      - VITE_ALLOWED_HOSTS=${PIVOT_PUBLIC_HOST}
 
   sandbox-manager:
     restart: unless-stopped
