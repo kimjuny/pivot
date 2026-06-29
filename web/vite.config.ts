@@ -78,6 +78,12 @@ export default defineConfig({
     port: 3000,
     // Allow access from any host (required when running inside a container)
     host: true,
+    // Accept the configured public hostname(s) so the app is reachable via the
+    // production domain (Vite DNS-rebinding guard). Unset in dev → Vite keeps
+    // its safe localhost-only default, so local development is unaffected.
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS
+      ? process.env.VITE_ALLOWED_HOSTS.split(',').map((host) => host.trim()).filter(Boolean)
+      : undefined,
     watch: {
       usePolling: true,
     },

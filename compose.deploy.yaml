@@ -16,6 +16,10 @@ services:
 
   frontend:
     restart: unless-stopped
+    environment:
+      # Public hostname the Vite dev server must accept (DNS-rebinding guard).
+      # Dev (compose.yaml) leaves this unset → localhost-only default.
+      - VITE_ALLOWED_HOSTS=agent.bungieai.com
 
   sandbox-manager:
     restart: unless-stopped
@@ -26,4 +30,10 @@ services:
       - SANDBOX_MEMORY_LIMIT=768m
 
   sandbox-base:
-    restart: "no"
+    # podman-compose enforces depends_on strictly; sandbox-base exits right after
+    # building (command "true"), which would leave sandbox-manager/backend blocked
+    # on an "improper" (exited) dependency. Keep it alive in prod so the dependency
+    # graph stays valid. (dev uses docker-compose, which honours service_started
+    # without needing the dependency to remain running.)
+    restart: unless-stopped
+    command: ["sleep", "infinity"]
