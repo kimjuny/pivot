@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from app.config import get_secret_key
 from jose import JWTError, jwt
 
-_SURFACE_TOKEN_SECRET_KEY = os.getenv(
-    "SECRET_KEY", "your-secret-key-change-in-production"
-)
+# The surface-token signing key is the same one used for login JWTs, resolved
+# and validated by get_secret_key() (production requires an explicit SECRET_KEY).
+_SURFACE_TOKEN_SECRET_KEY = get_secret_key()
 _SURFACE_TOKEN_ALGORITHM = "HS256"
 _SURFACE_TOKEN_LIFETIME = timedelta(hours=8)
 _SURFACE_TOKEN_KIND = "surface_session"

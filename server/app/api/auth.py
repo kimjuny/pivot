@@ -3,14 +3,13 @@
 This module provides endpoints for user authentication including login.
 """
 
-import os
 import re
 from datetime import UTC, datetime
 from typing import Any
 
 import bcrypt
 from app.api.dependencies import get_db
-from app.config import get_settings
+from app.config import get_secret_key, get_settings
 from app.models.access import Role
 from app.models.user import (
     ChangePasswordRequest,
@@ -28,8 +27,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlmodel import Session, select
 
-# Security configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+# Security configuration.
+# The JWT signing key is resolved and validated by get_secret_key() (see
+# config.py): production refuses to start without an explicit SECRET_KEY,
+# development keeps a shared default so local runs need no extra configuration.
+SECRET_KEY = get_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 

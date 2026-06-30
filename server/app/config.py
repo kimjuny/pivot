@@ -117,3 +117,30 @@ def get_settings() -> Settings:
         return cast("Any", Settings)(_env_file=str(base_env), ENV=env)
 
     return Settings(ENV=env)
+
+
+# Historical insecure placeholder used as the JWT/surface-token signing-key
+# default. Kept here so production can refuse it explicitly (see get_secret_key).
+_INSECURE_DEFAULT_SECRET_KEY = "your-secret-key-change-in-production"
+
+
+@lru_cache
+def get_secret_key() -> str:
+    """Resolve and validate the JWT/surface-token signing key.
+
+    Why: this key authenticates every access token, so a hardcoded default
+    (visible in the public source tree) would let anyone forge admin tokens.
+    Production therefore refuses to start without an explicit SECRET_KEY;
+    development keeps the shared default so local runs need no extra config.
+    """
+    value = os.getenv("SECRET_KEY", "")
+    if get_settings().ENV == "production":
+        if value in ("", _INSECURE_DEFAULT_SECRET_KEY):
+            raise RuntimeError(
+                "SECRET_KEY is not configured for production. Generate a random "
+                'value (e.g. `python -c "import secrets; print(secrets.token_urlsafe(48))"`) '
+                "and expose it as the SECRET_KEY environment variable. Refusing "
+                "to start with the default/empty signing key."
+            )
+        return value
+    return value or _INSECURE_DEFAULT_SECRET_KEY

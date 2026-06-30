@@ -13,6 +13,16 @@
 services:
   backend:
     restart: unless-stopped
+    environment:
+      # Production runs in production mode (drops dev conveniences) and MUST be
+      # given an explicit token-signing key + sandbox-manager token. All three
+      # resolve from the deploy host's gitignored .env: ${VAR:?...} makes compose
+      # itself abort if either secret is unset, and the backend additionally
+      # refuses to start on the public default key — so a misconfigured deploy
+      # can never silently fall back to forging-attackable credentials.
+      - ENV=production
+      - SECRET_KEY=${PIVOT_SECRET_KEY:?set PIVOT_SECRET_KEY in the deploy host .env}
+      - SANDBOX_MANAGER_TOKEN=${PIVOT_SANDBOX_TOKEN:?set PIVOT_SANDBOX_TOKEN in the deploy host .env}
 
   frontend:
     restart: unless-stopped
@@ -29,6 +39,7 @@ services:
       # Idle sandboxes are still reaped after SANDBOX_POOL_IDLE_TTL_SECONDS.
       - SANDBOX_POOL_MAX_SIZE=2
       - SANDBOX_MEMORY_LIMIT=768m
+      - SANDBOX_MANAGER_TOKEN=${PIVOT_SANDBOX_TOKEN:?set PIVOT_SANDBOX_TOKEN in the deploy host .env}
 
   sandbox-base:
     # podman-compose enforces depends_on strictly; sandbox-base exits right after
