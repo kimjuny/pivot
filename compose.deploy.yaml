@@ -26,10 +26,22 @@ services:
 
   frontend:
     restart: unless-stopped
+    # Production serves the precompiled SPA via nginx instead of the Vite dev
+    # server: the dev server ships every module as its own request (hundreds per
+    # first paint, painfully slow over the public internet), while the built
+    # bundle is a handful of static chunks. Dev (compose.yaml) is untouched.
+    # Frontend code changes require rebuilding this image: after `git pull`, run
+    # `podman compose -f compose.yaml -f compose.deploy.yaml up -d --build frontend`.
+    build:
+      context: .
+      dockerfile: Containerfile.frontend
+      target: runtime
+    command: ["nginx", "-g", "daemon off;"]
     environment:
-      # Public hostname the Vite dev server must accept (DNS-rebinding guard).
-      # Set PIVOT_PUBLIC_HOST in the deploy host's (gitignored) .env file.
-      # Dev (compose.yaml) leaves it unset → localhost-only default.
+      # Resolved so a missing PIVOT_PUBLIC_HOST still fails the deploy loudly and
+      # the dev/prod .env contract stays uniform. nginx itself ignores this value
+      # (it is a Vite dev-server DNS-rebinding guard, irrelevant for a same-origin
+      # static SPA behind Caddy).
       - VITE_ALLOWED_HOSTS=${PIVOT_PUBLIC_HOST}
 
   sandbox-manager:

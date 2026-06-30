@@ -1,0 +1,32 @@
+# =============================================================================
+# Pivot — Production Frontend Image (nginx serving the built SPA)
+# Selected by compose.deploy.yaml (frontend service override) to replace the
+# Vite dev server used in development. Serves the precompiled bundle and
+# reverse-proxies /api to the backend container.
+# =============================================================================
+
+# ---- Stage 1: Build frontend ------------------------------------------------
+FROM docker.io/library/node:20-alpine AS frontend-build
+
+WORKDIR /build/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --legacy-peer-deps
+
+COPY web/ ./
+# Same-origin API base — nginx proxies /api to the backend container.
+ENV VITE_API_BASE_URL=/api
+RUN npm run build
+
+
+# ---- Stage 2: nginx runtime -------------------------------------------------
+FROM docker.io/library/nginx:alpine AS runtime
+
+# Built SPA → nginx document root
+COPY --from=frontend-build /build/web/dist /usr/share/nginx/html
+
+# nginx config: serve the SPA (with client-routing fallback) + proxy /api
+COPY nginx.frontend.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 3000
+
+CMD ["nginx", "-g", "daemon off;"]
