@@ -24,9 +24,15 @@ FROM docker.io/library/nginx:alpine AS runtime
 # Built SPA → nginx document root
 COPY --from=frontend-build /build/web/dist /usr/share/nginx/html
 
-# nginx config: serve the SPA (with client-routing fallback) + proxy /api
-COPY nginx.frontend.conf /etc/nginx/conf.d/default.conf
+# nginx config (template): serve the SPA (client-routing fallback) + proxy /api.
+# The __RESOLVER__ placeholder is filled at start by frontend-entrypoint.sh from
+# /etc/resolv.conf, since the container-runtime DNS differs (Docker vs Podman).
+COPY nginx.frontend.conf /etc/nginx/default.conf.tmpl
+COPY frontend-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 3000
 
+# The entrypoint injects the resolver, then hands off to nginx via CMD.
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
