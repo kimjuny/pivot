@@ -4,12 +4,13 @@ import {
   Eye,
   FileSpreadsheet,
   FileText,
+  FileVideo,
   ImagePlus,
-  Presentation,
 } from "lucide-react";
 
 import type { AssistantAttachment } from "../types";
 import { AssistantAttachmentDialog } from "./AssistantAttachmentDialog";
+import { resolveRendererKind } from "./file-renderer/resolveRendererKind";
 
 interface AssistantAttachmentListProps {
   attachments?: AssistantAttachment[];
@@ -28,49 +29,44 @@ function formatAttachmentSize(sizeBytes: number): string {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-/**
- * Converts attachment render kinds into user-facing labels with calmer typography.
- */
-function formatAttachmentKindLabel(attachment: AssistantAttachment): string {
-  if (attachment.renderKind === "download") {
-    return "Raw";
-  }
-  if (attachment.renderKind === "text") {
-    return "Text";
-  }
-  if (attachment.renderKind === "markdown") {
-    return "Markdown";
-  }
-  if (attachment.renderKind === "pdf") {
-    return "PDF";
-  }
-  if (attachment.renderKind === "image") {
-    return "Image";
-  }
-
-  return attachment.renderKind;
-}
+const KIND_LABELS: Record<string, string> = {
+  markdown: "Markdown",
+  text: "Text",
+  pdf: "PDF",
+  image: "Image",
+  docx: "Document",
+  spreadsheet: "Sheet",
+  video: "Video",
+  unknown: "Raw",
+};
 
 /**
  * Picks a recognizable icon for one assistant-generated attachment card.
+ * Uses the same renderer-kind resolution as the preview dialog so the card and
+ * the opened viewer never disagree about what a file is.
  */
 function getAttachmentIcon(attachment: AssistantAttachment) {
-  if (attachment.renderKind === "image") {
-    return <ImagePlus className="h-4 w-4 text-info" />;
+  const kind = resolveRendererKind({
+    extension: attachment.extension,
+    mimeType: attachment.mimeType,
+    filename: attachment.displayName,
+  });
+  switch (kind) {
+    case "image":
+      return <ImagePlus className="h-4 w-4 text-info" />;
+    case "pdf":
+      return <Eye className="h-4 w-4 text-danger" />;
+    case "docx":
+      return <FileText className="h-4 w-4 text-primary" />;
+    case "spreadsheet":
+      return <FileSpreadsheet className="h-4 w-4 text-success" />;
+    case "video":
+      return <FileVideo className="h-4 w-4 text-warning" />;
+    case "unknown":
+      return <Download className="h-4 w-4 text-muted-foreground" />;
+    default:
+      return <FileText className="h-4 w-4 text-muted-foreground" />;
   }
-  if (attachment.renderKind === "pdf") {
-    return <Eye className="h-4 w-4 text-danger" />;
-  }
-  if (attachment.extension === "pptx") {
-    return <Presentation className="h-4 w-4 text-warning" />;
-  }
-  if (attachment.extension === "xlsx") {
-    return <FileSpreadsheet className="h-4 w-4 text-success" />;
-  }
-  if (attachment.renderKind === "download") {
-    return <Download className="h-4 w-4 text-muted-foreground" />;
-  }
-  return <FileText className="h-4 w-4 text-muted-foreground" />;
 }
 
 /**
@@ -109,8 +105,14 @@ export function AssistantAttachmentList({
                 {attachment.displayName}
               </div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                {formatAttachmentKindLabel(attachment)} ·{" "}
-                {formatAttachmentSize(attachment.sizeBytes)}
+                {KIND_LABELS[
+                  resolveRendererKind({
+                    extension: attachment.extension,
+                    mimeType: attachment.mimeType,
+                    filename: attachment.displayName,
+                  })
+                ] ?? "Raw"}{" "}
+                · {formatAttachmentSize(attachment.sizeBytes)}
               </div>
             </div>
           </button>

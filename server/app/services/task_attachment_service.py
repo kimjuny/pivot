@@ -25,7 +25,6 @@ _TEXT_EXTENSIONS = {
     "conf",
     "cpp",
     "css",
-    "csv",
     "env",
     "go",
     "h",
@@ -61,6 +60,16 @@ _TEXT_EXTENSIONS = {
 }
 _TEXT_FILENAMES = {"dockerfile", "makefile", ".env"}
 _MARKDOWN_MIME_TYPES = {"text/markdown", "text/x-markdown"}
+_DOCX_EXTENSIONS = {"docx"}
+_DOCX_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+_SPREADSHEET_EXTENSIONS = {"xlsx", "xls", "csv"}
+_SPREADSHEET_MIME_TYPES = {
+    "text/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 _TEXT_MIME_TYPES = {
     "application/ecmascript",
     "application/javascript",
@@ -363,6 +372,14 @@ class TaskAttachmentService:
         elif extension == "pdf" or mime_type == "application/pdf":
             render_kind = "pdf"
             mime_type = "application/pdf"
+        elif extension in _DOCX_EXTENSIONS or mime_type in _DOCX_MIME_TYPES:
+            render_kind = "docx"
+        elif (
+            extension in _SPREADSHEET_EXTENSIONS or mime_type in _SPREADSHEET_MIME_TYPES
+        ):
+            render_kind = "spreadsheet"
+        elif mime_type.startswith("video/"):
+            render_kind = "video"
         elif mime_type.startswith("image/"):
             render_kind = "image"
         elif (

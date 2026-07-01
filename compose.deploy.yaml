@@ -23,6 +23,13 @@ services:
       - ENV=production
       - SECRET_KEY=${PIVOT_SECRET_KEY:?set PIVOT_SECRET_KEY in the deploy host .env}
       - SANDBOX_MANAGER_TOKEN=${PIVOT_SANDBOX_TOKEN:?set PIVOT_SANDBOX_TOKEN in the deploy host .env}
+      # Public base URL the backend hands to external users — channel identity-link
+      # URLs (e.g. Work WeChat's first-message linking flow) and other outbound
+      # links. Without this, web_public_base_url falls back to http://localhost:8003
+      # and the links are unreachable from the internet. Reuses PIVOT_PUBLIC_HOST
+      # (already required by the frontend's VITE_ALLOWED_HOSTS); https matches the
+      # Caddy reverse proxy in front of the stack.
+      - WEB_PUBLIC_BASE_URL=https://${PIVOT_PUBLIC_HOST}
 
   frontend:
     restart: unless-stopped

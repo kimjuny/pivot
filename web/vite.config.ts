@@ -74,6 +74,19 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    // Pre-bundle the heavy renderer deps so the first time a user opens a
+    // pdf/docx/xlsx attachment Vite doesn't trigger a runtime
+    // dep-reoptimization (the long Suspense spinner + page reload that happens
+    // when these are discovered lazily through React.lazy()).
+    include: [
+      'react-pdf',
+      'pdfjs-dist',
+      'docx-preview',
+      'jszip',
+      'xlsx',
+    ],
+  },
   server: {
     port: 3000,
     // Allow access from any host (required when running inside a container)

@@ -70,6 +70,15 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    include: [
+      'react-pdf',
+      'pdfjs-dist',
+      'docx-preview',
+      'jszip',
+      'xlsx',
+    ],
+  },
   server: {
     strictPort: true,
     proxy: {

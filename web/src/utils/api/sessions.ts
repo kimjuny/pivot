@@ -136,7 +136,15 @@ export interface TaskAttachmentAsset {
   mime_type: string;
   extension: string;
   size_bytes: number;
-  render_kind: 'markdown' | 'pdf' | 'image' | 'text' | 'download';
+  render_kind:
+    | 'markdown'
+    | 'pdf'
+    | 'image'
+    | 'text'
+    | 'docx'
+    | 'spreadsheet'
+    | 'video'
+    | 'download';
   workspace_relative_path: string;
   created_at: string;
 }
