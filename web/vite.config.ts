@@ -85,6 +85,7 @@ export default defineConfig({
       'docx-preview',
       'jszip',
       'xlsx',
+      'ogl',
     ],
   },
   server: {

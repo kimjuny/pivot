@@ -6,13 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import PasswordInput from '@/components/PasswordInput';
+import LightRays from '@/components/backgrounds/LightRays';
+import BorderGlow from '@/components/backgrounds/BorderGlow';
 import {
-  Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 
 /**
  * Returns the post-login destination in priority order:
@@ -50,6 +52,7 @@ function LoginPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const reducedMotion = useReducedMotion();
 
   /** Redirect already-authenticated users away from the login page. */
   useEffect(() => {
@@ -97,15 +100,23 @@ function LoginPage() {
   };
 
   return (
-    <div
-      className="flex min-h-screen flex-col items-center justify-center bg-background px-4"
-      style={{
-        backgroundImage:
-          'radial-gradient(circle, oklch(var(--foreground) / 0.1) 1px, transparent 1px)',
-        backgroundSize: '22px 22px',
-      }}
-    >
-      <div className="w-full max-w-sm animate-fade-in">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-4">
+      {!reducedMotion && (
+        <div className="pointer-events-none fixed inset-0 z-0">
+          <LightRays
+            raysOrigin="top-center"
+            raysColor="#e8e0ff"
+            raysSpeed={0.5}
+            lightSpread={1.2}
+            rayLength={2.2}
+            fadeDistance={1.2}
+            saturation={0.9}
+            mouseInfluence={0.15}
+            className="opacity-60 dark:opacity-90"
+          />
+        </div>
+      )}
+      <div className="relative z-10 w-full max-w-sm animate-fade-in">
         {/* Brand wordmark */}
         <div className="mb-7 flex items-center justify-center gap-3 select-none">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary">
@@ -122,7 +133,7 @@ function LoginPage() {
         </div>
 
         {/* Login card */}
-        <Card className="rounded-2xl border-border/50 shadow-2xl shadow-black/30">
+        <BorderGlow borderRadius={20} animated={!reducedMotion}>
           <CardHeader className="pb-4">
             <CardTitle className="text-base font-semibold">Sign in</CardTitle>
             <CardDescription>Enter your credentials to continue</CardDescription>
@@ -178,7 +189,7 @@ function LoginPage() {
               </Button>
             </form>
           </CardContent>
-        </Card>
+        </BorderGlow>
 
         {/* Demo credentials hint */}
       </div>
